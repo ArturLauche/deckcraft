@@ -50,6 +50,9 @@ pub struct Textures {
     /// SmartArt gallery pictures by layout, style and colours (and, for hover previews, the
     /// outline's hash).
     smartart: HashMap<String, TextureHandle>,
+    /// Template gallery previews, by starter name and pixel width. Built once: a starter deck is
+    /// rendered only the first time its tile is shown.
+    templates: HashMap<String, TextureHandle>,
     clock: u64,
     pub last_render_ms: f64,
 }
@@ -351,6 +354,53 @@ impl Textures {
         self.estimate = None;
         self.drawn = None;
         self.thumbs.clear();
+        self.templates.clear();
+    }
+
+    /// A template gallery preview: the starter's first slide, rendered once and cached. `None`
+    /// when the frame's budget is used up (draw a placeholder and ask for another frame).
+    pub fn template_thumb(
+        &mut self,
+        ctx: &egui::Context,
+        starter: &deckcraft_engine::templates::Starter,
+        width_px: u32,
+        budget: &mut u32,
+    ) -> Option<TextureHandle> {
+        let key = format!("{}|{width_px}", starter.name);
+        if let Some(t) = self.templates.get(&key) {
+            return Some(t.clone());
+        }
+        if *budget == 0 {
+            return None;
+        }
+        *budget -= 1;
+        let doc = deckcraft_engine::templates::build(starter.name, deckcraft_model::defaults::WIDE).ok()?;
+        let (tw, th) = fit_size((width_px, width_px * 9 / 16), max_side(ctx));
+        let scale = tw as f64 / doc.slide_size.width.max(1.0);
+        let img = deckcraft_render::render_slide(&doc, 0, &RenderOpts { scale, size: Some((tw, th)), threads: 0, ..Default::default() });
+        let tex = upload_editor(ctx, format!("template-{key}"), to_color_image(&img, false));
+        self.templates.insert(key, tex.clone());
+        Some(tex)
+    }
+
+    /// A user template's first slide, loaded from `path` and rendered once.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn user_template_thumb(&mut self, ctx: &egui::Context, path: &std::path::Path, width_px: u32, budget: &mut u32) -> Option<TextureHandle> {
+        let key = format!("user|{}|{width_px}", path.display());
+        if let Some(t) = self.templates.get(&key) {
+            return Some(t.clone());
+        }
+        if *budget == 0 {
+            return None;
+        }
+        *budget -= 1;
+        let doc = deckcraft_engine::templates::load_user_path(path).ok()?;
+        let (tw, th) = fit_size((width_px, width_px * 9 / 16), max_side(ctx));
+        let scale = tw as f64 / doc.slide_size.width.max(1.0);
+        let img = deckcraft_render::render_slide(&doc, 0, &RenderOpts { scale, size: Some((tw, th)), threads: 0, ..Default::default() });
+        let tex = upload_editor(ctx, format!("template-{key}"), to_color_image(&img, false));
+        self.templates.insert(key, tex.clone());
+        Some(tex)
     }
 
     /// A thumbnail texture; renders at most `budget` new thumbnails per frame (returns None when

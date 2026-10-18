@@ -530,3 +530,37 @@ fn glyph_ranges_follow_shaping_clusters() {
     // A run starting mid-paragraph, multi-byte characters in visual (right-to-left) order.
     assert_eq!(glyph_text_ranges("αβγ", (3, 6), &[(5, 'γ'), (4, 'β'), (3, 'α')], 3), vec![4..6, 2..4, 0..2]);
 }
+
+#[test]
+fn print_colour_modes_keep_alpha_and_map_luminance() {
+    let mut px = [200, 30, 30, 128];
+    ColorMode::Color.pixel(&mut px);
+    assert_eq!(px, [200, 30, 30, 128], "colour leaves the pixel alone");
+    let mut grey = [200, 30, 30, 128];
+    ColorMode::Grayscale.pixel(&mut grey);
+    assert_eq!(grey[0], grey[1]);
+    assert_eq!(grey[1], grey[2]);
+    assert_eq!(grey[3], 128, "alpha is kept");
+    assert!(grey[0] < 120, "red is dark in luminance, got {}", grey[0]);
+    let mut mono = [200, 30, 30, 255];
+    ColorMode::BlackAndWhite.pixel(&mut mono);
+    assert_eq!(mono, [0, 0, 0, 255]);
+    let mut light = [250, 250, 250, 255];
+    ColorMode::BlackAndWhite.pixel(&mut light);
+    assert_eq!(light, [255, 255, 255, 255]);
+    assert_eq!(ColorMode::parse("greyscale"), Some(ColorMode::Grayscale));
+    assert_eq!(ColorMode::parse("bw"), Some(ColorMode::BlackAndWhite));
+    assert_eq!(ColorMode::parse("sepia"), None);
+}
+
+#[test]
+fn greyscale_pdf_is_still_a_valid_document() {
+    let p = deck(2);
+    for color in [ColorMode::Grayscale, ColorMode::BlackAndWhite] {
+        let o = PdfOptions { color, ..opts(PageLayout::Slides) };
+        let bytes = export(&p, &o).expect("export");
+        assert!(bytes.starts_with(b"%PDF-"));
+        let pdf = hayro_syntax::Pdf::new(bytes).unwrap();
+        assert_eq!(pdf.pages().len(), 2);
+    }
+}

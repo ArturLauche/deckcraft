@@ -62,6 +62,51 @@ pub enum PageLayout {
     Handouts { per_page: u8 },
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+/// How printed slide artwork is coloured.
+pub enum ColorMode {
+    /// The slide's own colours.
+    #[default]
+    Color,
+    /// Luminance greys, for a mono printer that still shows shades.
+    Grayscale,
+    /// Pure black and white, for a fax or a high-contrast handout.
+    BlackAndWhite,
+}
+
+impl ColorMode {
+    /// Read the Print page's `color` id.
+    pub fn parse(id: &str) -> Option<ColorMode> {
+        match id.trim().to_ascii_lowercase().as_str() {
+            "color" | "colour" => Some(ColorMode::Color),
+            "grayscale" | "greyscale" | "gray" | "grey" => Some(ColorMode::Grayscale),
+            "blackandwhite" | "black-and-white" | "bw" | "mono" | "monochrome" => Some(ColorMode::BlackAndWhite),
+            _ => None,
+        }
+    }
+
+    /// Apply the mode to one straight RGBA pixel. Alpha is kept.
+    pub fn pixel(self, px: &mut [u8; 4]) {
+        let lum = (u32::from(px[0]) * 2126 + u32::from(px[1]) * 7152 + u32::from(px[2]) * 722 + 5000) / 10_000;
+        match self {
+            ColorMode::Color => {}
+            ColorMode::Grayscale => {
+                let v = lum.min(255) as u8;
+                px[0] = v;
+                px[1] = v;
+                px[2] = v;
+            }
+            ColorMode::BlackAndWhite => {
+                let v = if lum >= 128 { 255 } else { 0 };
+                px[0] = v;
+                px[1] = v;
+                px[2] = v;
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PdfOptions {
@@ -79,6 +124,8 @@ pub struct PdfOptions {
     pub title: Option<String>,
     /// Handout/notes page size in points (default US Letter portrait; see [`paper_size`]).
     pub paper: (f64, f64),
+    /// Colour, greyscale or black-and-white slide artwork.
+    pub color: ColorMode,
 }
 
 impl Default for PdfOptions {
@@ -92,6 +139,7 @@ impl Default for PdfOptions {
             frame_slides: true,
             title: None,
             paper: (612.0, 792.0),
+            color: ColorMode::Color,
         }
     }
 }
@@ -412,13 +460,14 @@ fn straight(rgba: &mut [u8]) {
 
 /// A backdrop raster as one PDF image, composited onto white (slides are normally opaque). Equal
 /// backdrops become equal images, which the writer stores once.
-fn backdrop(mut img: deckcraft_render::Image) -> Image {
+fn backdrop(mut img: deckcraft_render::Image, color: ColorMode) -> Image {
     for px in img.pixels.as_chunks_mut::<4>().0 {
         let a = px[3] as u32;
         for c in &mut px[..3] {
             *c = (*c as u32 + (255 - a)).min(255) as u8;
         }
         px[3] = 255;
+        color.pixel(px);
     }
     Image::from_rgba8(img.pixels, img.width, img.height)
 }
@@ -452,11 +501,16 @@ impl Exporter<'_> {
             && let Some(size) = Size::from_wh(b.width() as f32, b.height() as f32)
         {
             s.push_transform(&Transform::from_translate(b.x0 as f32, b.y0 as f32));
-            s.draw_image(backdrop(back), size);
+            s.draw_image(backdrop(back, self.opts.color), size);
             // Taken, not copied: a print-resolution slide is ~16 MB.
             let mut rgba = front.pixels;
             if rgba.as_chunks::<4>().0.iter().any(|px| px[3] != 0) {
                 straight(&mut rgba);
+                if self.opts.color != ColorMode::Color {
+                    for px in rgba.as_chunks_mut::<4>().0 {
+                        self.opts.color.pixel(px);
+                    }
+                }
                 s.draw_image(Image::from_rgba8(rgba, w, h), size);
             }
             s.pop();

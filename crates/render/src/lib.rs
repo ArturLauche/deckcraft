@@ -118,6 +118,20 @@ impl Image {
         images::stamp_png_dpi(&self.to_png(), dpi)
     }
 
+    /// WebP of this image, lossless, with its alpha channel.
+    pub fn to_webp(&self) -> std::result::Result<Vec<u8>, String> {
+        use image::ImageEncoder as _;
+        let straight = self.to_straight();
+        let expected = self.width as usize * self.height as usize * 4;
+        if straight.len() != expected {
+            return Err(format!("the picture is {} bytes, not {expected}", straight.len()));
+        }
+        let mut buf = Vec::new();
+        let enc = image::codecs::webp::WebPEncoder::new_lossless(&mut buf);
+        enc.write_image(&straight, self.width, self.height, image::ExtendedColorType::Rgba8).map_err(|e| format!("WebP encode: {e}"))?;
+        Ok(buf)
+    }
+
     pub fn to_jpeg(&self, quality: u8) -> Vec<u8> {
         self.to_jpeg_at(quality, None)
     }

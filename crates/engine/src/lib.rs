@@ -13,6 +13,7 @@ pub mod connect;
 pub mod drawtable;
 pub mod file_access;
 pub mod fonts;
+pub mod formats;
 pub mod gif_export;
 pub mod guard;
 pub mod icons;
@@ -28,6 +29,7 @@ pub mod spell;
 pub mod templates;
 pub mod thesaurus;
 pub mod tools;
+pub mod video_export;
 
 use std::sync::Arc;
 
@@ -465,6 +467,8 @@ pub struct Session {
     depth: u32,
     /// Crash-recovery folder (the app sets it; saving or closing a presentation removes its entry).
     pub recovery_dir: Option<std::path::PathBuf>,
+    /// User template folder (the app sets it; File › New lists these beside the built-ins).
+    pub template_dir: Option<std::path::PathBuf>,
     /// Media playback state, written by the UI host every frame (empty without a host).
     pub media_status: std::collections::HashMap<ShapeId, MediaStatus>,
     /// Animated GIF pictures paused with `media.gifPlay` (the others play).
@@ -503,6 +507,7 @@ impl Session {
             anim_painter: None,
             depth: 0,
             recovery_dir: None,
+            template_dir: None,
             media_status: Default::default(),
             gif_paused: Default::default(),
             mac_keys: cfg!(target_os = "macos"),

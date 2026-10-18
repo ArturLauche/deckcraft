@@ -251,6 +251,42 @@ pub fn builtin_themes() -> Vec<Theme> {
             "Roboto",
             "Roboto",
         ),
+        t(
+            "Terracotta",
+            scheme(
+                "Terracotta",
+                ["2B1B17", "FFF8F0", "5C3A2E", "F6E7D8", "C05621", "DD6B20", "9C4221", "2F855A", "2C5282", "805AD5", "C05621", "2F855A"],
+            ),
+            "Playfair Display",
+            "Lato",
+        ),
+        t(
+            "Blueprint",
+            scheme(
+                "Blueprint",
+                ["0A2540", "FFFFFF", "133B5C", "E6F0F7", "1D6FA5", "2E9CCA", "48B3D9", "F2C14E", "E4572E", "5C6B73", "1D6FA5", "E4572E"],
+            ),
+            "Roboto",
+            "Roboto",
+        ),
+        t(
+            "Orchard",
+            scheme(
+                "Orchard",
+                ["1F2A1A", "FFFDF5", "3A4A2F", "F1F3E4", "6B8E23", "A4B465", "C49A3A", "B5651D", "7A4E2D", "4F6F52", "6B8E23", "C49A3A"],
+            ),
+            "Merriweather",
+            "Nunito Sans",
+        ),
+        t(
+            "Monochrome",
+            scheme(
+                "Monochrome",
+                ["111111", "FFFFFF", "333333", "F4F4F4", "555555", "777777", "999999", "BBBBBB", "2B2B2B", "666666", "333333", "555555"],
+            ),
+            "Inter",
+            "Inter",
+        ),
     ]
 }
 

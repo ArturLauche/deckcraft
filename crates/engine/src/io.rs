@@ -55,6 +55,86 @@ pub fn write_file(path: &str, _bytes: &[u8]) -> Result<(), String> {
     Err(format!("{path}: saving to a path is not available in the browser"))
 }
 
+/// Check that `path` may be written (the automation write root), without touching it. Video
+/// export hands the checked path to ffmpeg, which writes the file itself.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn check_write_path(path: &str) -> Result<(), String> {
+    crate::file_access::check_write(path)
+}
+
+/// Read a file in one of the application's own folders (user templates, settings): unlike
+/// [`read_file`], no automation root applies, because the path never comes from a command.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_app_file(path: &std::path::Path) -> Result<Vec<u8>, String> {
+    std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Write a file in one of the application's own folders, atomically (a temporary sibling renamed
+/// over it). Like [`read_app_file`], this is for app-owned paths only.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn write_app_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let err = |e: std::io::Error| format!("{}: {e}", path.display());
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(err)?;
+    }
+    let mut attempts = 0;
+    let (tmp, mut file) = loop {
+        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "file".into());
+        let tmp = path.with_file_name(format!(".{name}.{}.{}.saving", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed)));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(f) => break (tmp, f),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempts < 16 => attempts += 1,
+            Err(e) => return Err(err(e)),
+        }
+    };
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    let result = written.and_then(|()| std::fs::rename(&tmp, path));
+    if let Err(e) = result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err(e));
+    }
+    Ok(())
+}
+
+/// The regular files directly in an application folder, sorted by name. A missing folder is an
+/// empty list, not an error.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn app_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return vec![] };
+    let mut out: Vec<std::path::PathBuf> =
+        entries.flatten().map(|e| e.path()).filter(|p| p.is_file() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'))).collect();
+    out.sort();
+    out
+}
+
+/// A fresh temporary file for an export's own scratch data (never a path a command named), with
+/// its name. The caller removes it.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn create_temp(prefix: &str) -> Result<(std::path::PathBuf, std::fs::File), String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir();
+    for _ in 0..32 {
+        let path = dir.join(format!("{prefix}-{}-{}.tmp", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed)));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(f) => return Ok((path, f)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        }
+    }
+    Err(format!("{}: no free temporary name", dir.display()))
+}
+
+/// Remove a file this engine wrote (a scratch file, or a partial export).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn remove_file(path: &std::path::Path) {
+    let _ = std::fs::remove_file(path);
+}
+
 /// The size in bytes of the file at `path`; `None` when it can't be read (or is outside the
 /// automation read root, so File › Info doesn't reveal files the agent may not read).
 #[cfg(not(target_arch = "wasm32"))]

@@ -936,6 +936,9 @@ fn zoom_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     if ui.radio(mode == "fit", "Fit").clicked() {
         mode = "fit".into();
     }
+    if ui.radio(mode == "fitWidth", "Fit width").clicked() {
+        mode = "fitWidth".into();
+    }
     for pct in ZOOM_PRESETS {
         let on = mode == "percent" && percent == pct.to_string();
         if ui.radio(on, format!("{pct}%")).clicked() {
@@ -957,6 +960,10 @@ fn zoom_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     if ok {
         if mode == "fit" {
             app.ui.zoom = None;
+            return true;
+        }
+        if mode == "fitWidth" {
+            let _ = app.run("view.fitWidth", json!({}));
             return true;
         }
         match parse_zoom_percent(&percent) {
