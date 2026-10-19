@@ -79,8 +79,9 @@ Today it can:
   export PDF (slides, notes pages, handouts with selectable text, colour or grayscale), PNG/JPEG/WebP,
   an animated GIF, MP4/WebM video with transitions and builds, and text or Markdown outlines.
   Unsaved work is kept by AutoRecover.
-- **Share and sync**: File ▸ Share links with view, comment or edit access, expiry and revocation;
-  opt-in settings sync through a local folder, S3-compatible storage or Google Drive.
+- **Share, co-edit and sync**: File ▸ Share links with view, comment or edit access, expiry and
+  revocation; live sessions through a shared folder with presence, remote cursors and roles; opt-in
+  settings sync through a local folder, S3-compatible storage or Google Drive.
 - **Automate**: 300+ commands with undo, all scriptable from the CLI, a JSON control channel and an
   MCP server for AI agents.
 

@@ -1,6 +1,6 @@
 # DeckCraft vs Microsoft PowerPoint: parity assessment
 
-> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (checklist grows to 195 rows with the template gallery, settings sync, share links and real-time co-authoring; video and print re-scored; breadth stays 84%, ready and stage unchanged; previous: community PR wave 2026-10-14) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (real-time co-authoring moves from missing to partial with a shared-folder journal, presence, cursors, roles, snapshot undo and recovery; Review 61% → 72%, breadth stays 84%, ready and stage unchanged; previous: template gallery, settings sync, share links, video and print) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The authoritative answer to "how close is DeckCraft to PowerPoint, and how much work is left?".
 [ROADMAP.md](../ROADMAP.md) summarizes it; [gaps.md](gaps.md) itemizes every shortfall;
@@ -12,7 +12,7 @@ number.
 | Number | Value | Kind |
 |---|---|---|
 | **Feature breadth** (weighted checklist) | **84%** over 195 features (P0 92%, P1 82%, P2 55%) | **measured**: `cargo xtask parity` formula over [parity-checklist.md](parity-checklist.md); rows re-scored by the 2026-10-19 feature arc |
-| Menu-bar coverage | **59%** (128 of 217 app-specific PowerPoint menu items have a DeckCraft command or UI label of the same name) | **measured** (heuristic lower bound): script matching the 2026-10-07 PowerPoint menu dump against the 226 engine command labels of the d556ff9 snapshot (not re-measured since; the registry is 328 now) and the UI's strings; excludes the app, Window and Help menus and the subtitle language lists |
+| Menu-bar coverage | **59%** (128 of 217 app-specific PowerPoint menu items have a DeckCraft command or UI label of the same name) | **measured** (heuristic lower bound): script matching the 2026-10-07 PowerPoint menu dump against the 226 engine command labels of the d556ff9 snapshot (not re-measured since; the registry is 333 now) and the UI's strings; excludes the app, Window and Help menus and the subtitle language lists |
 | **Ready for real work** | **~55%** | **estimated**: weighted dimension table below (was ~56% until the features row was recomputed from written area weights) |
 | **Mainstream practitioner** | **~53%** | **estimated**: [method below](#mainstream-practitioner-and-essentials-user) |
 | **Essentials user** | **~62%** | **estimated**: [method below](#mainstream-practitioner-and-essentials-user) |
@@ -196,7 +196,7 @@ Features row of the dimension table keeps ~62% until the next full re-measure). 
 | Transitions | 4 | 100% | ~80% | 4–8 | 3-D transitions approximated in 2-D | [animation-parity.md](animation-parity.md) |
 | Animations | 6 | 85% | ~65% | 10–16 | 64 of PowerPoint's ~190 effects, Animation Pane timeline, preview from the selected effect, rewind lost on save (#77) | [animation-parity.md](animation-parity.md) |
 | Slide show and presenter view | 8 | 68% | ~60% | 10–16 | Second-display placement, laser from presenter view, recording, subtitles, ink depth | [slideshow-parity.md](slideshow-parity.md) |
-| Review | 3 | 61% | ~45% | 8–14 | Real-time co-authoring, compare depth, version history, real spelling dictionaries | [file-format-parity.md](file-format-parity.md) |
+| Review | 3 | 72% | ~50% | 8–14 | Socket relay and CRDT merge beyond the shared-folder journal, compare depth, version history, real spelling dictionaries | [file-format-parity.md](file-format-parity.md) |
 | Draw (ink) | 2 | 50% | ~30% | 5–9 | Pen tilt, ink to math, lasso, ink to shape/text depth | [hardware-parity.md](hardware-parity.md) |
 | Undo and clipboard | 3 | 100% | ~75% | 3–5 | Image paste (#53) | [ui-parity.md](ui-parity.md) |
 | Automation ✱ | — | 100% | ahead | 0 | | [mcp.md](mcp.md) |
@@ -251,7 +251,7 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
 - **Files:** `.deckcraft` (zip + JSON), PPTX import/export (also opens `.potx`/`.ppsx`), PDF
   export (slides, notes, handouts 1–9 per page, text layer, links, bookmarks), PNG/JPEG, outline
   text, AutoRecover.
-- **Automation:** 328 engine commands (`cmd!` registrations in `crates/engine/src/cmd/*`), every
+- **Automation:** 333 engine commands (`cmd!` registrations in `crates/engine/src/cmd/*`), every
   one reachable from `deckcraft-cli`, the JSON control channel and MCP. The menu-bar measurement
   and the d556ff9 snapshot still count 226.
 - **Platforms:** signed releases for macOS (universal), Windows x64/x86/arm64, Linux
@@ -289,6 +289,7 @@ scored done (16 open issues).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Real-time co-authoring re-scored partial: shared-folder journal, presence, cursors, roles, snapshot undo and recovery. Review 61% → 72%; breadth stays 84%, ready ~55%, stage alpha |
 | 2026-10-19 | minor | Checklist 195 rows: template gallery, settings sync, share links and real-time co-authoring added; video and print re-scored. Breadth stays 84%, ready ~55%, stage alpha |
 | 2026-10-16 | trivial | Arrange shortfall: Align to Slide and Align Selected Objects are in the Align menu. Percentages unchanged |
 | 2026-10-14 | minor | Community PR wave folded: one headline breadth row (84% over 191 features after `cargo xtask parity`; duplicate checklist rows removed), one row per feature area with the latest breadth and shortfalls, one Themes / Slide show / Views / Review / Automation bullet each (320 engine commands). SmartArt ready ~35% (Text Pane, 6e40335) moves the area mean to 62.8%; dimension and headline percentages unchanged |

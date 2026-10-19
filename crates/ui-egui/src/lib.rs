@@ -1680,6 +1680,14 @@ impl SlideApp {
         self.drain_control(ctx);
         self.poll_opening();
         self.sync_tick(now);
+        if self.session.collab.is_some() {
+            if let Err(e) = self.session.collab_tick() {
+                self.set_status(format!("Live session: {e}"));
+            }
+            // Journals are files on another machine or a synced folder; polling a few times a
+            // second keeps edits live without a busy loop.
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+        }
         if self.fonts_ready {
             self.drain_inbox();
         }

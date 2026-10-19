@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~20 points and ~120–210 h away
 
-> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** major (real MP4/WebM video export, a 13-format Save As/Export registry, 17 starter templates in 10 categories with user templates, enforced share links and permissions, S3/Drive/folder settings sync, print colour and reading-view polish; previous: community PR wave 2026-10-14) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (shared-folder live collaboration with ordered journals, roles, presence, cursors, snapshot undo and recovery; a socket relay and CRDT merge remain; previous: video export, format registry, templates, share links, settings sync and print colour) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -77,7 +77,7 @@ EMF/SVG pictures, the data-loss and startup-crash bugs (#60, #40, #59) and the b
 | Transitions | 100% | ~80% | 4–8 | [animation-parity](docs/animation-parity.md) |
 | Animations | 85% | ~65% | 10–16 | [animation-parity](docs/animation-parity.md) |
 | Slide show and presenter view | 68% | ~60% | 10–16 | [slideshow-parity](docs/slideshow-parity.md) |
-| Review | 61% | ~45% | 8–14 | [gaps](docs/gaps.md) |
+| Review | 72% | ~50% | 8–14 | [gaps](docs/gaps.md) |
 | Draw (ink) | 50% | ~30% | 5–9 | [hardware-parity](docs/hardware-parity.md) |
 | Undo and clipboard | 100% | ~75% | 3–5 | [ui-parity](docs/ui-parity.md) |
 | Files (commands; formats above) | 78% | ~50% | in file formats | [file formats](docs/file-format-parity.md) |
@@ -133,6 +133,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 |---|---|
 | 2026-10-19 | Video export: MP4/H.264 and WebM/VP9 through the system `ffmpeg`, 720p/1080p/4K, 24/30/60 fps, per-slide or rehearsed timings, transitions and build animations, optional autoplay audio, slide ranges and hidden slides, progress and cancel. File ▸ Export, Save As, `file.export`, CLI and MCP share the same options; a missing encoder is an explicit error. The animated GIF still shows one frame per slide |
 | 2026-10-19 | Save As and Export use one 13-format registry with editable formats first (`.deckcraft`, `.pptx`, `.potx`, `.ppsx`) and copies after (PDF, PNG, JPEG, WebP, GIF, MP4, WebM, TXT, MD), each with its losses, options and desktop/web availability. WebP keeps transparency; Markdown exports titles, bullets, notes and comments. `.potx` and `.ppsx` now carry their real content types |
+| 2026-10-19 | Live collaboration: File ▸ Share starts or joins a shared-folder journal. Peers append ordered commands, enforce editor/commenter/viewer roles, publish presence and remote cursors, and converge after undo/redo or a failed command through snapshots and recovery requests; reconnect reads the snapshot and journals. A socket relay, CRDT merge and folder-independent security remain open |
 | 2026-10-19 | File ▸ Share: capability links with viewer, commenter or editor access, expiry and revocation, invitations and participant removal, in a sidecar beside the deck. The engine refuses edits and pointer gestures for restricted sessions; a viewer can save a copy elsewhere and edit that copy. Real-time co-editing and a relay service remain open |
 | 2026-10-19 | Preferences ▸ Settings sync: opt-in, per-category sync through a local folder, S3-compatible storage or Google Drive, with last-writer-wins by category, a stale remote guard, conflict reporting and owner-only credentials. Local settings stay primary and an offline sync fails without changing the deck |
 | 2026-10-19 | Print and views: PDF colour, grayscale or black-and-white; slide/notes/handout layouts, ranges, paper, orientation and frame options; reading view notes and zoom; Fit width in the zoom dialog. Native print dialogs and margin/scale controls remain open |

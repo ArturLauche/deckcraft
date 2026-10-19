@@ -51,5 +51,25 @@ Coordinates are slide points (1/72 inch; a 16:9 slide is 960 × 540) unless note
 | `show.start` / `show.end` | `{from?: slide index, custom?: name, reading?}` | Slide show. `custom` plays that custom show from its first slide and does not change Set Up. With no `from` and no `custom`, playback starts at the first slide of the show order |
 | `app.open` / `app.save` / `app.export` / `app.quit` | `{path, …}` | Files (export takes the `file.export` params, e.g. `{"path": "deck.pdf", "layout": "handouts", "perPage": 3}`, `{"path": "deck.gif", "width": "large", "secondsPerSlide": 3, "loop": false}`, `{"path": "deck.mp4", "width": "1080p", "fps": 30, "useTimings": true}` for video, or `{"path": "slide.png", "transparentBackground": true}` for a PNG without the slide background) |
 
+### Live collaboration
+
+The `collab.*` commands are ordinary `engine.execute` commands, so the control channel, CLI and
+MCP drive a live session exactly as the Share page does. `folder` is the shared folder; `name` is
+shown to the other peers; `role` is `editor`, `commenter` or `viewer`. `collab.start` writes the
+first snapshot and fails if the folder already has one (use `collab.join`). The session is tied to
+the open document: open, close or revert only after `collab.leave`.
+
+```json
+{"id": 1, "method": "engine.execute", "params": {"command": "collab.start", "params": {"folder": "/shared/talk.deckcraft.collab", "name": "Ada"}}}
+{"id": 2, "method": "engine.execute", "params": {"command": "collab.cursor", "params": {"slide": 0, "x": 0.5, "y": 0.25}}}
+{"id": 3, "method": "engine.execute", "params": {"command": "collab.status", "params": {}}}
+{"id": 4, "method": "engine.execute", "params": {"command": "collab.leave", "params": {}}}
+```
+
+`collab.status` returns `{live: false}` or `{live: true, folder, peer, name, role, revision, peers:
+[{id, name, color, role, lastSeen, slide, x, y}], error}`. `collab.cursor` coordinates are
+normalized to the slide rectangle. The UI polls the folder every 150 ms; a headless host calls
+`collab_tick` between commands (the control channel does this when it executes `collab.status`).
+
 The MCP server (`deckcraft-cli mcp`, see [mcp.md](mcp.md)) wraps the same methods for Claude
 and other agents; `deckcraft-cli app --method METHOD [PARAMS]` sends one request from a shell.

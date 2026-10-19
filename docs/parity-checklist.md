@@ -1,6 +1,6 @@
 # PowerPoint feature checklist
 
-> **Generated:** 2026-10-19 (summary by `cargo xtask parity`; video, print, template gallery, settings sync and share links re-scored after the 2026-10-19 feature arc; real-time co-authoring added as missing; earlier rows re-scored by the 2026-10-14 community PR wave and 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Generated:** 2026-10-19 (summary by `cargo xtask parity`; real-time co-authoring re-scored partial after the shared-folder journal landed; video, print, template gallery, settings sync and share links re-scored after the 2026-10-19 feature arc; earlier rows re-scored by the 2026-10-14 community PR wave and 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
 **Weighted breadth parity: 84%** over 195 features.
@@ -8,7 +8,7 @@ The summary between `<!-- SUMMARY -->
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
-| P1 | 68 | 47 | 17 | 4 | 82% |
+| P1 | 68 | 47 | 18 | 3 | 82% |
 | P2 | 55 | 18 | 25 | 12 | 55% |
 
 | Area | Parity |
@@ -30,7 +30,7 @@ The summary between `<!-- SUMMARY -->
 | Transitions | 100% |
 | Animations | 85% |
 | Slide show | 68% |
-| Review | 61% |
+| Review | 72% |
 | Draw | 50% |
 | Undo & clipboard | 100% |
 | Automation (✱) | 100% |
@@ -225,7 +225,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Review | Accessibility checker | P2 | D |
 | Review | Compare presentations | P2 | P |
 | Review | Share links with view/comment/edit permissions, expiry and revocation | P1 | D |
-| Review | Real-time co-authoring (presence, cursors, merge, collaborative undo) | P1 | M |
+| Review | Real-time co-authoring (presence, cursors, merge, collaborative undo) | P1 | P |
 | Review | Track changes / version history | P2 | M |
 | Draw | Ink pens, highlighter, eraser | P1 | P |
 | Draw | Ink to shape / text | P2 | P |

@@ -103,6 +103,50 @@ pub fn check_write_path(path: &str) -> Result<(), String> {
     crate::file_access::check_write(path)
 }
 
+/// Create a directory (and its parents) that a command named, inside the automation write root.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn create_dir_all(path: &std::path::Path) -> Result<(), String> {
+    crate::file_access::check_write(&path.to_string_lossy())?;
+    std::fs::create_dir_all(path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn create_dir_all(path: &std::path::Path) -> Result<(), String> {
+    Err(format!("{}: the browser has no collaboration folder", path.display()))
+}
+
+/// The names in a directory a command named, inside the automation read root.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_dir(path: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
+    crate::file_access::check_read(&path.to_string_lossy())?;
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(path).map_err(|e| format!("{}: {e}", path.display()))? {
+        out.push(entry.map_err(|e| format!("{}: {e}", path.display()))?.path());
+    }
+    out.sort();
+    Ok(out)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn read_dir(path: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
+    Err(format!("{}: the browser has no collaboration folder", path.display()))
+}
+
+/// Append bytes to a file a command named. Each peer owns its journal, so append-only writes do
+/// not race with another peer's writes to the same file.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn append_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    crate::file_access::check_write(&path.to_string_lossy())?;
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    file.write_all(bytes).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn append_file(path: &std::path::Path, _bytes: &[u8]) -> Result<(), String> {
+    Err(format!("{}: the browser has no collaboration folder", path.display()))
+}
+
 /// Read a file in one of the application's own folders (user templates, settings): unlike
 /// [`read_file`], no automation root applies, because the path never comes from a command.
 #[cfg(not(target_arch = "wasm32"))]

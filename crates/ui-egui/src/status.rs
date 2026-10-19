@@ -12,6 +12,7 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     egui::Panel::bottom("status").exact_size(28.0).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
         let rect = ui.max_rect();
+        let live = app.session.collab_status();
         let Some(st) = app.session.active() else { return };
         let n = st.doc.slides.len();
         let mut left = match st.selection.target {
@@ -21,6 +22,9 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
         if st.access != deckcraft_engine::sharing::Access::Full {
             left.push_str(" · ");
             left.push_str(st.access.label());
+        }
+        if let Some(live) = &live {
+            left.push_str(&format!(" · Live ({} peer{})", live.peers.len().max(1), if live.peers.len() == 1 { "" } else { "s" }));
         }
         let p = ui.painter();
         p.text(pos2(rect.min.x + 14.0, rect.center().y), Align2::LEFT_CENTER, &left, theme::font(12.0), t.text_dim);

@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** major (video export and the format registry close the old video gap; print colour and layouts narrow printing; share links with enforced access and settings sync land; real-time co-editing is the new collaboration gap; previous: community PR wave 2026-10-14) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (shared-folder live collaboration lands with ordered journals, roles, presence, cursors, snapshot undo and recovery; a socket relay and CRDT merge remain; previous: video export, format registry, print colour, share links and settings sync) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -160,14 +160,21 @@ Detail in [file-format-parity.md](file-format-parity.md).
 
 ## Features
 
-### Real-time co-editing and a self-hostable relay
-- **Evidence:** File ▸ Share issues capability links with viewer, commenter or editor access,
-  expiry, revocation, invitations and participants, and the engine refuses edits for restricted
-  sessions. There is no presence, live cursor, concurrent text merge, collaborative undo or
-  relay/shared-folder journal, so two editors still work on separate copies.
-- **Impact:** teams that expect Google-Docs-style co-authoring cannot use DeckCraft for it yet.
-- **Estimate:** 30–50 h (an operation journal and merge rules in `engine`, a small relay crate with
-  authentication and rooms, presence/cursors in `ui-egui`, reconnect and recovery tests).
+### Live collaboration: a relay and CRDT merge
+- **Evidence:** File ▸ Share now starts or joins a shared-folder session (`collab.start`,
+  `collab.join`, `collab.leave`, `collab.status`, `collab.cursor`). Peers append ordered commands
+  to `journal-<peer>.jsonl`, publish presence and cursors in `peer-<peer>.json`, enforce editor /
+  commenter / viewer roles before local and remote commands, and converge after undo/redo or a
+  failed command through `snapshot.json` and recovery requests. Reconnect is reading the snapshot
+  and the journals after a restart. It works offline on a shared drive or Syncthing folder.
+- **Remaining:** there is no socket relay, so teams that cannot share a folder cannot co-edit.
+  Commands are ordered by `(timestamp, peer, sequence)`, not merged by a CRDT: two edits to the
+  same text at the same instant are last-writer-wins, not interleaved. The folder's filesystem
+  permissions are the security boundary; there is no room token or end-to-end encryption.
+- **Impact:** teams that expect Google-Docs-style co-authoring can collaborate on a shared folder,
+  but not across the internet without one, and simultaneous typing is not character-perfect.
+- **Estimate:** 15–25 h (a small relay crate with authentication and rooms, a CRDT or per-shape
+  merge for text, and reconnect/merge tests).
 
 ### Font weights beyond Regular, Bold and Italic (#69)
 - **Evidence:** #69; the font database maps a family to four faces.
@@ -371,6 +378,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Shared-folder live collaboration lands: ordered journals, roles, presence, cursors, snapshot undo and recovery. A socket relay and CRDT merge remain |
 | 2026-10-19 | major | Video export and the format registry close the old video gap; printing narrows to native print and margins; share links and settings sync land; real-time co-editing added as the collaboration gap |
 | 2026-10-15 | trivial | PPTX trigger sequences keep later On Click steps instead of converting them to After Previous; mixed starts, independent buttons and paragraph builds have synthetic round-trip regressions |
 | 2026-10-16 | trivial | AutoFormat superscripts ordinals (1st, 22nd) as you type, with an AutoCorrect option to turn it off; automatic bulleted lists remain |

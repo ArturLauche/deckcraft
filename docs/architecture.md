@@ -1,10 +1,10 @@
 # DeckCraft architecture
 
-> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (video export, the format registry, share links and access enforcement, settings sync; previous: community PR wave 2026-10-14) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (shared-folder live collaboration with presence, cursors, role enforcement and snapshot undo; previous: video export, the format registry, share links and settings sync) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft is built today. The binding rules (layering, everything is a command, thin UI, never
 break wasm, never crash) are in [AGENTS.md](../AGENTS.md) §3–§5; this document describes what
-exists. 212k lines of Rust in 24 crates, 3 apps and `xtask`; 1,786 `#[test]` functions
+exists. 213k lines of Rust in 24 crates, 3 apps and `xtask`; 1,796 `#[test]` functions
 (`cargo xtask stats` counts them per crate).
 
 ## Layers
@@ -20,7 +20,7 @@ nothing below L6 uses egui, eframe, winit or rfd.
 | L2 | `text`, `anim`, `format`, `media` | Shaping (HarfRust), UAX #9 bidi, UAX #14 line breaking, autofit, caret hit testing; per-shape animation state over time, the show state machine, transition frame layouts, Morph matching; `.deckcraft` (zip + JSON + media) and outline text; media probing, decoding, mixer and clock |
 | L3 | `render`, `pptx` | `vello_cpu` raster of slides, masters and layouts (fills, outlines, effects, pictures, tables, charts, Morph frames); PPTX import/export from ECMA-376 |
 | L4 | `pdf` | App-owned export layout and rendering through the shared `craft-pdf` writer |
-| L5 | `engine` | Sessions, documents, selection, undo history on shared slide snapshots, the command registry (`cmd/*`), pointer tools, keys, AutoRecover, the panic guard (`guard.rs`), the format registry (`formats.rs`), video timelines (`video_export.rs`), share links and access (`sharing.rs`, `cmd/share.rs`) and settings sync (`sync.rs`) |
+| L5 | `engine` | Sessions, documents, selection, undo history on shared slide snapshots, the command registry (`cmd/*`), pointer tools, keys, AutoRecover, the panic guard (`guard.rs`), the format registry (`formats.rs`), video timelines (`video_export.rs`), share links and access (`sharing.rs`, `cmd/share.rs`), settings sync (`sync.rs`) and shared-folder live collaboration (`collab.rs`, `cmd/collab.rs`) |
 | L6 | `ui-egui`, `mcp` | The PowerPoint-style interface (ribbon with 10 tabs + contextual tabs, canvas, thumbnails, panes, 41 dialogs, show and presenter windows, the JSON control channel); the MCP server (JSON-RPC 2.0 over stdio), headless or connected to a running app |
 | apps | `deckcraft` (desktop: eframe/wgpu, cpal audio, logging), `deckcraft-cli` (run, render, convert, mcp, app), `deckcraft-web` (trunk; WebGPU with WebGL2 fallback), `xtask` | Exempt from layering |
 
@@ -64,6 +64,32 @@ local folder, S3-compatible storage (signed through `curl --aws-sigv4`) and Goog
 refresh token through `curl`); the engine owns the merge and the UI worker owns the thread and the
 progress state. Credentials live in an owner-only config file (`0600` on Unix) and never in a
 snapshot.
+
+## Live collaboration
+
+`collab.rs` is a shared-folder journal, not a server: every peer appends commands to
+`journal-<peer>.jsonl` in a folder beside the deck, writes presence and its pointer to
+`peer-<peer>.json`, and reads the other peers' files. `snapshot.json` is the full document at a
+known revision. `collab.start` writes the first snapshot; `collab.join` adopts the latest one and
+tails the journals. The UI polls every 150 ms, so a shared drive, a Syncthing folder or a network
+share is enough and the deck keeps working offline.
+
+Each journal entry carries a sequence, timestamp, peer id, role and the normal command id and
+params. Peers apply entries through `Session::execute_remote`, which skips the journal echo and the
+local undo stack; the same command code, panic guard and access checks run as for a local edit.
+Entries are ordered by `(time, peer, seq)`. A snapshot records the highest sequence it contains for
+each peer, so a peer whose clock is behind still gets new entries applied. `collab.start` / `join`
+take an editor, commenter or viewer role; the role is enforced before a local command and again before a remote entry is
+applied. Undo, redo and repeat publish a new snapshot instead of an inverse command, so every peer
+converges on the actor's document and starts a fresh history. A peer whose command fails writes a
+recovery request; the next editor publishes a snapshot and the others reload it. Presence files
+carry the cursor's slide and normalized position; the canvas draws remote pointers in the peer's
+colour.
+
+The limits are explicit: two edits to the same text at the same instant are ordered by timestamp
+(the later command wins), not merged by a CRDT; a relay for teams that cannot share a folder is the
+next step; and the folder's filesystem permissions, not a capability token, are the outer security
+boundary. `docs/gaps.md` tracks those remaining pieces.
 
 ## Video export
 
@@ -117,6 +143,7 @@ macOS, Windows, Linux, FreeBSD and web artifacts.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Shared-folder live collaboration: ordered journals, role enforcement, presence/cursors, snapshot undo and recovery. 333 commands, 213k lines, 1,796 tests |
 | 2026-10-19 | minor | Format registry, video export worker, share links with engine-level access enforcement, and opt-in settings sync (folder/S3/Drive). 328 commands, 212k lines, 1,786 tests |
 | 2026-10-14 | minor | Community PR wave folded: one L2/L5/L6 row each; command registry 320 (`cmd!` registrations in `cmd/*`), 41 dialogs (titled in `dialogs.rs`), 202k lines, 24 crates (`metafile` added at L0), 1,641 tests. The per-PR rows below give the counts each PR saw on its own branch |
 | 2026-10-14 | minor | Size and Position dialog (`shape.sizePosition`): position, size, rotation, scale and lock aspect in one undo step. 227 commands, 28 dialogs |

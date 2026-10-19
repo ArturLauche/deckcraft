@@ -1,6 +1,6 @@
 # UI parity with PowerPoint
 
-> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (Share page, settings-sync Preferences, 17-template gallery, video/format export, print colour modes, Fit width and reading-view zoom; previous: community PR wave 2026-10-14) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (Share page gains a live-session panel with presence, cursors and roles; previous: Share page, settings-sync Preferences, template gallery, video/format export and reading-view zoom) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft looks and feels next to PowerPoint: the shell, the ribbon, menus, panes, dialogs,
 direct manipulation, keyboard and precision. Observations of PowerPoint are kept locally in
@@ -54,7 +54,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Save | Saves; a presentation never saved goes to Save As | Same (`file.save`) |
 | Save As | Places, folder, file name, type, Save, More options | All 13 registry formats, editable ones first (`.deckcraft`, `.pptx`, `.potx`, `.ppsx`) and copies after (PDF, PNG, JPEG, WebP, GIF, MP4, WebM, TXT, MD), each with its losses and options. Save opens the system Save dialog (web: Download); copies go through Export (`file.saveAs`, `file.export`) |
 | Print | Print and Copies, Printer, Print All / Selection / Current / Custom Range, Slides box, layout (Full Page Slides, Notes Pages, Outline, Handouts 1–9), sides, collation, colour, Edit Header & Footer; page preview with pager and zoom | Print, Print All Slides / Current Slide / Custom Range, Slides box (`1-3, 5`), Full Page Slides / Notes Pages / Handouts 1–9, Print Hidden Slides, Frame Slides, Edit Header & Footer, paper, orientation, colour/grayscale/black-and-white; preview with pager. DeckCraft prints through a PDF (`file.export`) opened in the system viewer, which has the printers (web: downloaded). No printer list, copies, sides, margins or scaling |
-| Share | Cloud sharing | File ▸ Share: capability links for view, comment or edit, expiry and revocation, invitations and participants, stored in a sidecar beside the deck. No cloud account or real-time co-editing |
+| Share | Cloud sharing | File ▸ Share: capability links for view, comment or edit, expiry and revocation, invitations and participants, stored in a sidecar beside the deck; a live-session panel starts or joins a shared-folder journal with presence, cursors, editor/commenter/viewer roles, revision status and Leave. No cloud account, socket relay or CRDT merge |
 | Export | Create PDF/XPS Document, Create a Video, Create an Animated GIF, Package Presentation for CD, Create Handouts, Change File Type | Create PDF, Create Handouts (a PDF), Create a Video (MP4/WebM through ffmpeg), Animated GIF, PNG/JPEG/WebP, Markdown/outline, Change File Type. No CD package |
 | Close | Closes; asks Save / Don't Save / Cancel about unsaved changes | Same (`file.close` after the prompt); Ctrl+W asks too |
 | Account | User information, sign-in, Office Background and Office Theme, product information, About | Appearance (light/dark, `view.dark`), product information, About DeckCraft. No accounts to sign in to |
@@ -165,6 +165,7 @@ consistency is open (#73, #56).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | File ▸ Share gains a live-session panel: start/join a shared folder, presence, remote cursors, roles and revision status. A socket relay, CRDT merge and native print sheet stay open |
 | 2026-10-19 | minor | File ▸ Share page, settings sync in Preferences, 17-template gallery, 13-format Save As/Export, print colour modes and reading-view zoom. Real-time co-authoring and a native print sheet stay open |
 | 2026-10-16 | minor | Export › Change File Type › PNG and the Export… dialog offer a transparent background (#784) |
 | 2026-10-14 | minor | Gray list markers on empty paragraphs while editing; caret keeps the list indent before typing |
