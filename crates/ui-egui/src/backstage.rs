@@ -199,6 +199,16 @@ pub struct Backstage {
     pub print_landscape: bool,
     /// `color`, `grayscale` or `blackAndWhite`: printed slide artwork.
     pub print_color: &'static str,
+    /// Page margin in points, slide scale in percent, and optional printed header/footer lines.
+    pub print_margin: f32,
+    pub print_scale: f32,
+    pub print_header: String,
+    pub print_footer: String,
+    pub print_numbers: bool,
+    /// Send the PDF to the default printer with `lp` instead of opening it in the viewer.
+    pub print_direct: bool,
+    /// Full-page slides: fit the slide on the chosen paper instead of a slide-sized page.
+    pub print_fit_paper: bool,
     pub preview_page: usize,
     pub export: ExportTask,
     /// Export › Change File Type / Save As: the chosen type (an [`save_types`] id).
@@ -252,6 +262,13 @@ impl Backstage {
             print_paper: "letter",
             print_landscape: false,
             print_color: "color",
+            print_margin: 36.0,
+            print_scale: 100.0,
+            print_header: String::new(),
+            print_footer: String::new(),
+            print_numbers: true,
+            print_direct: false,
+            print_fit_paper: false,
             preview_page: 0,
             export: ExportTask::Pdf,
             file_type: "pptx",
@@ -1324,12 +1341,19 @@ pub fn print_params(bs: &Backstage, slides: &[usize]) -> Value {
         "paper": bs.print_paper,
         "orientation": if bs.print_landscape { "landscape" } else { "portrait" },
         "color": bs.print_color,
+        "margin": bs.print_margin.clamp(0.0, 216.0),
+        "scale": bs.print_scale.clamp(10.0, 200.0),
+        "header": bs.print_header.trim(),
+        "footer": bs.print_footer.trim(),
+        "pageNumbers": bs.print_numbers,
+        "direct": bs.print_direct,
+        "fitPaper": bs.print_layout == "slides" && bs.print_fit_paper,
     })
 }
 
 /// The printed page size in points: the slide size for full-page slides, else the chosen paper.
 pub fn print_page_size(bs: &Backstage, doc: &deckcraft_model::Presentation) -> (f32, f32) {
-    if bs.print_layout == "slides" {
+    if bs.print_layout == "slides" && !bs.print_fit_paper {
         return (doc.slide_size.width as f32, doc.slide_size.height as f32);
     }
     let (w, h) = deckcraft_engine::cmd::file::paper_size(bs.print_paper, bs.print_landscape).unwrap_or((612.0, 792.0));
@@ -1411,9 +1435,12 @@ fn print(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                 }
             });
             ui.add_space(4.0);
-            // PowerPoint prints full-page slides on slide-shaped pages; paper and orientation are
-            // for notes pages and handouts.
-            ui.add_enabled_ui(bs.print_layout != "slides", |ui| {
+            if bs.print_layout == "slides" && ui.checkbox(&mut bs.print_fit_paper, "Fit Slide to Paper").changed() {
+                bs.preview_page = 0;
+            }
+            // PowerPoint prints full-page slides on slide-shaped pages by default; paper and
+            // orientation are for notes pages, handouts, and slides explicitly fitted to paper.
+            ui.add_enabled_ui(bs.print_layout != "slides" || bs.print_fit_paper, |ui| {
                 let paper = deckcraft_engine::cmd::file::PAPERS.iter().find(|p| p.0 == bs.print_paper).map_or("Letter", |p| p.1);
                 egui::ComboBox::from_id_salt("backstage_print_paper").width(240.0).selected_text(paper).show_ui(ui, |ui| {
                     for (id, label, _) in deckcraft_engine::cmd::file::PAPERS {
@@ -1446,12 +1473,36 @@ fn print(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                 }
             });
             ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Margin:");
+                if ui.add(egui::DragValue::new(&mut bs.print_margin).suffix(" pt").max_decimals(0)).changed() {
+                    bs.print_margin = bs.print_margin.clamp(0.0, 216.0);
+                    bs.preview_page = 0;
+                }
+                ui.label("Scale:");
+                if ui.add(egui::DragValue::new(&mut bs.print_scale).suffix("%").max_decimals(0)).changed() {
+                    bs.print_scale = bs.print_scale.clamp(10.0, 200.0);
+                    bs.preview_page = 0;
+                }
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let l = ui.label("Header:");
+                ui.add(egui::TextEdit::singleline(&mut bs.print_header).hint_text("optional").desired_width(176.0)).labelled_by(l.id);
+            });
+            ui.horizontal(|ui| {
+                let l = ui.label("Footer:");
+                ui.add(egui::TextEdit::singleline(&mut bs.print_footer).hint_text("optional").desired_width(176.0)).labelled_by(l.id);
+            });
+            ui.checkbox(&mut bs.print_numbers, "Page Numbers");
+            ui.add_space(4.0);
+            ui.checkbox(&mut bs.print_direct, "Send Directly to Printer (lp)");
             if ui.checkbox(&mut bs.print_hidden, "Print Hidden Slides").changed() {
                 bs.preview_page = 0;
             }
             ui.checkbox(&mut bs.print_frame, "Frame Slides");
             ui.add_space(6.0);
-            if ui.link("Edit Header & Footer").clicked() {
+            if ui.link("Document Header & Footer…").clicked() {
                 let _ = app.run("app.dialog", json!({"id": "headerFooter"}));
             }
         });
@@ -1489,6 +1540,10 @@ fn preview(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, doc: &deckcraft_
     p.rect_filled(page.translate(vec2(2.0, 3.0)), 0.0, t.shadow);
     p.rect_filled(page, 0.0, Color32::WHITE);
     let aspect = (doc.slide_size.height / doc.slide_size.width.max(1.0)) as f32;
+    // Preview the same margin, scale and header/footer the PDF gets.
+    let margin = (bs.print_margin * scale).clamp(0.0, page.width().min(page.height()) * 0.4);
+    let zoom = (bs.print_scale / 100.0).clamp(0.1, 2.0);
+    let scaled = |r: Rect| if (zoom - 1.0).abs() < f32::EPSILON { r } else { Rect::from_center_size(r.center(), r.size() * zoom) };
     let mut budget = 4u32;
     let mut draw_slide = |ui: &mut Ui, i: usize, r: Rect| {
         let px = (r.width() * ui.ctx().pixels_per_point()).round().clamp(16.0, 1600.0) as u32;
@@ -1505,20 +1560,26 @@ fn preview(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, doc: &deckcraft_
     match bs.print_layout {
         "slides" => {
             if let Some(i) = on_page.first() {
-                draw_slide(ui, *i, page);
+                let r = if bs.print_fit_paper {
+                    let inner = page.shrink(margin);
+                    let w = inner.width().min(inner.height() / aspect.max(0.01));
+                    scaled(Rect::from_center_size(inner.center(), vec2(w, w * aspect)))
+                } else {
+                    scaled(page)
+                };
+                draw_slide(ui, *i, r);
             }
         }
         "notes" => {
             if let Some(i) = on_page.first() {
-                let w = page.width() * 0.75;
-                let r = Rect::from_min_size(pos2(page.center().x - w / 2.0, page.top() + page.height() * 0.08), vec2(w, w * aspect));
+                let inner = page.shrink(margin);
+                let w = inner.width() * 0.75;
+                let r = scaled(Rect::from_min_size(pos2(inner.center().x - w / 2.0, inner.top()), vec2(w, w * aspect)));
                 draw_slide(ui, *i, r);
                 let notes = doc.slides.get(*i).map(|s| s.notes_text()).unwrap_or_default();
                 let font = theme::font((11.0 * scale).clamp(5.0, 13.0));
-                let text_rect = Rect::from_min_max(
-                    pos2(page.left() + page.width() * 0.12, r.bottom() + 20.0 * scale),
-                    page.max - vec2(page.width() * 0.12, 30.0 * scale),
-                );
+                let text_rect =
+                    Rect::from_min_max(pos2(inner.left(), r.bottom() + 20.0 * scale), pos2(inner.right(), page.bottom() - margin.max(12.0 * scale)));
                 let galley = ui.painter().layout(notes, font, Color32::from_gray(30), text_rect.width());
                 ui.painter().with_clip_rect(text_rect).galley(text_rect.min, galley, Color32::from_gray(30));
             }
@@ -1533,7 +1594,7 @@ fn preview(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, doc: &deckcraft_
                 6 => (2, 3),
                 _ => (3, 3),
             };
-            let inner = page.shrink2(vec2(page.width() * 0.08, page.height() * 0.07));
+            let inner = page.shrink(margin);
             // Three a page leaves lines for notes beside each slide, as PowerPoint's handouts do.
             let slide_area = if n == 3 { Rect::from_min_size(inner.min, vec2(inner.width() * 0.5, inner.height())) } else { inner };
             let cell = vec2(slide_area.width() / cols as f32, slide_area.height() / rows as f32);
@@ -1541,7 +1602,7 @@ fn preview(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, doc: &deckcraft_
                 let (c, r) = ((k % cols) as f32, (k / cols) as f32);
                 let cell_rect = Rect::from_min_size(slide_area.min + vec2(c * cell.x, r * cell.y), cell).shrink(cell.x.min(cell.y) * 0.08);
                 let w = cell_rect.width().min(cell_rect.height() / aspect.max(0.01));
-                let sr = Rect::from_center_size(cell_rect.center(), vec2(w, w * aspect));
+                let sr = scaled(Rect::from_center_size(cell_rect.center(), vec2(w, w * aspect)));
                 draw_slide(ui, *i, sr);
                 if n == 3 {
                     for line in 1..=5 {
@@ -1552,6 +1613,34 @@ fn preview(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, doc: &deckcraft_
                 }
             }
         }
+    }
+    let text_font = theme::font((8.0 * scale).clamp(6.0, 10.0));
+    if !bs.print_header.trim().is_empty() {
+        ui.painter().text(
+            pos2(page.left() + margin, page.top() + margin * 0.5),
+            Align2::LEFT_TOP,
+            bs.print_header.trim(),
+            text_font.clone(),
+            Color32::from_gray(90),
+        );
+    }
+    if !bs.print_footer.trim().is_empty() {
+        ui.painter().text(
+            pos2(page.left() + margin, page.bottom() - margin.max(12.0 * scale)),
+            Align2::LEFT_BOTTOM,
+            bs.print_footer.trim(),
+            text_font.clone(),
+            Color32::from_gray(90),
+        );
+    }
+    if bs.print_numbers {
+        ui.painter().text(
+            pos2(page.right() - margin, page.bottom() - margin.max(12.0 * scale)),
+            Align2::RIGHT_BOTTOM,
+            (bs.preview_page + 1).to_string(),
+            text_font,
+            Color32::from_gray(90),
+        );
     }
     ui.add_space(6.0);
     ui.horizontal(|ui| {

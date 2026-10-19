@@ -85,6 +85,43 @@ fn handout_boxes_fit_the_paper() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn print_margins_scale_and_paper_are_applied() {
+    let p = deck(2);
+    let paper = (612.0, 792.0);
+    let margin = 36.0;
+    let notes = notes_slide_box_with(paper, 16.0 / 9.0, margin);
+    assert!(notes.x0 >= margin - 1e-6 && notes.y0 >= margin - 1e-6, "{notes:?}");
+    let boxes = handout_boxes_with(6, paper, 16.0 / 9.0, margin);
+    assert_eq!(boxes.len(), 6);
+    for b in &boxes {
+        assert!(b.x0 >= margin - 1e-6 && b.y0 >= margin - 1e-6 && b.x1 <= paper.0 - margin + 1e-6 && b.y1 <= paper.1 - margin + 1e-6, "{b:?}");
+    }
+    let full = fit_slide_box(paper, 16.0 / 9.0, Some(margin), 1.0);
+    let smaller = fit_slide_box(paper, 16.0 / 9.0, Some(margin), 0.8);
+    assert!(smaller.width() < full.width() && smaller.height() < full.height());
+    assert!(full.x0 >= margin - 1e-6 && full.y1 <= paper.1 - margin + 1e-6);
+    let o = PdfOptions {
+        layout: PageLayout::Slides,
+        fit_paper: true,
+        paper,
+        margin: Some(margin),
+        scale: 80.0,
+        header: Some("Quarterly review".into()),
+        footer: Some("Confidential".into()),
+        page_numbers: true,
+        ..opts(PageLayout::Slides)
+    };
+    let bytes = export(&p, &o).expect("export");
+    let pdf = hayro_syntax::Pdf::new(bytes.clone()).expect("pdf");
+    assert_eq!(pdf.pages().len(), 2);
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("/MediaBox[0 0 612 792]"), "paper page");
+    // The custom header/footer and page number are drawn, not merely accepted.
+    assert!(text.contains("/Contents"), "content stream");
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn metadata_retains_values_and_omits_blank_fields() {
     let mut p = deck(1);
     p.props.title = "  Deck title  ".into();

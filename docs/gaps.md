@@ -22,7 +22,7 @@ revision history.
 | 3 | PPTX round trip drops media options and rewind (#74, #77) | File format | B | 2–4 | [file-format-parity.md](file-format-parity.md) |
 | 4 | SVG pictures don't render (EMF/WMF do) | File format | B | 4–8 | [file-format-parity.md](file-format-parity.md) |
 | 5 | No localization: English only | Localization | B (infra + 5 languages) | 55–90 | [localization-parity.md](localization-parity.md) |
-| 6 | Printing goes through PDF; no native print dialog, margins or scaling | Feature | B | 3–5 | [file-format-parity.md](file-format-parity.md) |
+| 6 | Printing uses PDF/direct `lp`; no per-platform native print sheet | Feature | C | 1–2 | [file-format-parity.md](file-format-parity.md) |
 | 7 | Fonts: only Regular, Bold and Italic faces (#69) | Feature | B | 3–5 | [ui-parity.md](ui-parity.md) |
 | 8 | Image paste fails on Windows and Linux (#53) | Feature | B | 2–4 | [ui-parity.md](ui-parity.md) |
 | 9 | Presenter view isn't placed on the second display | Hardware | B | 3–5 | [slideshow-parity.md](slideshow-parity.md) |
@@ -133,15 +133,14 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Impact:** large PDFs; blurry when zoomed or printed.
 - **Estimate:** 5–8 h (vector paths, fills and text through the PDF writer). **Beta blocker.**
 
-### Printing goes through PDF; no native print dialog, margins or scaling
-- **Evidence:** File ▸ Print renders the selected slides, notes or handouts to PDF and opens it.
-  Scope, ranges, handout layouts 1–9, paper, orientation, frame, and colour/grayscale/black-and-white
-  are in the dialog. It does not call the OS print dialog, and it has no margin or scale controls;
-  the PDF uses fixed notes/handout margins.
-- **Impact:** offices that print handouts want the system print sheet and control over margins.
-  Printing the PDF is a workable fallback.
-- **Estimate:** 3–5 h (OS print sheet on each desktop platform, margin and scale options in
-  `PdfOptions`). **Beta blocker for the native path; the PDF path is usable.**
+### Printing has no per-platform native print sheet
+- **Evidence:** File ▸ Print renders the selected slides, notes or handouts to PDF with range,
+  layout, paper, orientation, frame, colour/grayscale/black-and-white, margins, scaling, custom
+  header/footer, page numbers and fit-to-paper. It opens the PDF, or on Unix-like systems with
+  CUPS sends it directly with `lp`. The preview shows the same margin, scale and header/footer.
+- **Impact:** the native sheet (printer choice, copies, duplex) is still the OS PDF viewer's job;
+  the direct path uses the default printer. The PDF path works everywhere.
+- **Estimate:** 1–2 h for a platform print sheet; not a beta blocker.
 
 ### Video export needs an external ffmpeg; GIF still doesn't animate transitions or builds
 - **Evidence:** `file.export` writes MP4/H.264 and WebM/VP9 with the system `ffmpeg`, including
@@ -307,7 +306,7 @@ Detail in [ui-parity.md](ui-parity.md).
   blocker.**
 - **Format Shape pane thinner than PowerPoint's** (Fill/Line/Effects/Size/Text Box pages, picture
   and texture options, 3-D). 6–10 h. **Beta blocker.**
-- **File tab depth** (#76 landed the Backstage): no online templates, cloud places, native printer
+- **File tab depth** (#76 landed the Backstage): no online templates, cloud places, native print sheet
   choice, CD exports or document protection. Video/GIF export, sharing links and settings sync are
   in. 4–8 h for the parts that need no cloud.
 - **Window chrome** (#71 macOS controls misaligned, #26 GNOME title bar, #41 system light/dark).
@@ -446,3 +445,4 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-11 | minor | Animated GIF export landed (#171); the entry now covers video export and animating transitions in the GIF |
 | 2026-10-10 | minor | Noted that no gap blocks alpha (core-workflow gate passes) |
 | 2026-10-10 | major | Created: every gap from the 2026-10-10 re-measure and the 16 open GitHub issues, ranked, with beta blockers marked |
+| 2026-10-19 | minor | Print margins, scaling, custom header/footer, page numbers, fit-to-paper and direct `lp` printing; native OS print sheet remains open |

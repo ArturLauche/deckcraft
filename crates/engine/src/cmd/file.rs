@@ -34,7 +34,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "file.saveTemplate", "Save as Template…", ["File"], None, "{name?} → {path, name} (a .deckcraft copy in the user template folder; a taken name gets “ 2”)", has_doc, save_template),
         cmd!(query "file.saveBytes", "Save to Data", [], None, "{format?: deckcraft|pptx|potx|ppsx|pdf|png|jpeg|webp|gif|outline|markdown} → {data: base64}", has_doc, save_bytes_cmd),
         cmd!(query "file.formats", "File Formats", [], None, "{} → [{id, label, extension, kind: editable|export, description, keeps, limitations, options, availability}]", always, formats),
-        cmd!(noundo "file.export", "Export…", ["File"], None, "{path, format?: deckcraft|pptx|potx|ppsx|pdf|png|jpeg|webp|gif|mp4|webm|outline|markdown (else by path), slide?: index, all?: bool, scale?: px per pt, layout?: slides|notes|handouts (pdf), perPage?: 1|2|3|4|6|9, paper?: letter|a4|legal|a3 (pdf), orientation?: portrait|landscape (pdf), color?: color|grayscale|blackAndWhite (pdf), dpi?, slides?: [index]|range (\"1-3,5\"), includeHidden?, textLayer?, frame?, transparentBackground?: bool (png/webp: leave the slide background out), width?: px 16-3840|small|medium|large|extraLarge (gif) or 720p|1080p|4k (video), height?: px (video), fps?: 1-120 (video), secondsPerSlide?: 0.1-600 (gif/video), loop?: bool (gif), useTimings?, transitions?, animations?, audio?, quality?: 0-100 (video)} → {path, bytes} or {files} (png, jpeg, webp); gif adds frames; video adds width, height, fps, frames, duration", has_doc, export),
+        cmd!(noundo "file.export", "Export…", ["File"], None, "{path, format?: deckcraft|pptx|potx|ppsx|pdf|png|jpeg|webp|gif|mp4|webm|outline|markdown (else by path), slide?: index, all?: bool, scale?: px per pt, layout?: slides|notes|handouts (pdf), perPage?: 1|2|3|4|6|9, paper?: letter|a4|legal|a3 (pdf), orientation?: portrait|landscape (pdf), color?: color|grayscale|blackAndWhite (pdf), margin?: points 0-216 (pdf), scale?: percent 10-200 (pdf), header?, footer?, pageNumbers?, fitPaper?: bool (pdf), dpi?, slides?: [index]|range (\"1-3,5\"), includeHidden?, textLayer?, frame?, transparentBackground?: bool (png/webp: leave the slide background out), width?: px 16-3840|small|medium|large|extraLarge (gif) or 720p|1080p|4k (video), height?: px (video), fps?: 1-120 (video), secondsPerSlide?: 0.1-600 (gif/video), loop?: bool (gif), useTimings?, transitions?, animations?, audio?, quality?: 0-100 (video)} → {path, bytes} or {files} (png, jpeg, webp); gif adds frames; video adds width, height, fps, frames, duration", has_doc, export),
         cmd!(
             query "file.info",
             "Info",
@@ -403,8 +403,10 @@ pub fn webp_bytes(doc: &Presentation, p: &Value) -> Result<Vec<u8>> {
 pub use deckcraft_pdf::{PAPERS, paper_size};
 
 /// PDF options from command params: `{layout: slides|notes|handouts, perPage, dpi, slides,
-/// includeHidden, textLayer, frame, paper: letter|a4|legal|a3, orientation: portrait|landscape}` for a presentation of `count` slides. `slides` is a list of
-/// 0-based indices or a range as typed in PowerPoint's Print page (`"1-3, 5"`, 1-based).
+/// includeHidden, textLayer, frame, paper: letter|a4|legal|a3, orientation: portrait|landscape,
+/// margin?: points, scale?: percent, header?, footer?, pageNumbers?, fitPaper?}` for a presentation
+/// of `count` slides. `slides` is a list of 0-based indices or a range as typed in PowerPoint's
+/// Print page (`"1-3, 5"`, 1-based).
 pub fn pdf_options(p: &Value, count: usize) -> Result<deckcraft_pdf::PdfOptions> {
     let mut o = deckcraft_pdf::PdfOptions { layout: deckcraft_pdf::PageLayout::Slides, ..Default::default() };
     o.layout = match str_param(p, "layout").unwrap_or("slides") {
@@ -437,6 +439,15 @@ pub fn pdf_options(p: &Value, count: usize) -> Result<deckcraft_pdf::PdfOptions>
             deckcraft_pdf::ColorMode::parse(id).ok_or_else(|| bad("file.export", format!("color “{id}” isn't color, grayscale or blackAndWhite")))?
         }
     };
+    o.margin = p.get("margin").and_then(Value::as_f64).map(|m| m.clamp(0.0, 216.0));
+    o.scale = f64_or(p, "scale", o.scale).clamp(10.0, 200.0);
+    // Header/footer text is user input: keep it one bounded line.
+    let text =
+        |key: &str| str_param(p, key).map(|t| t.lines().next().unwrap_or("").trim().chars().take(200).collect::<String>()).filter(|t| !t.is_empty());
+    o.header = text("header");
+    o.footer = text("footer");
+    o.page_numbers = bool_or(p, "pageNumbers", false);
+    o.fit_paper = bool_or(p, "fitPaper", false);
     Ok(o)
 }
 
@@ -869,7 +880,8 @@ mod color_at_tests;
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-    use super::write_file;
+    use super::{pdf_options, write_file};
+    use serde_json::json;
 
     fn scratch(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("deckcraft-write-file-{}-{name}", std::process::id()));
@@ -902,5 +914,36 @@ mod tests {
         assert!(dest.is_dir());
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn print_pdf_options_are_bounded() {
+        let o = pdf_options(
+            &json!({
+                "layout": "notes",
+                "paper": "a4",
+                "orientation": "landscape",
+                "margin": 500,
+                "scale": 1,
+                "header": "  Review\nsecond line  ",
+                "footer": "Confidential",
+                "pageNumbers": true,
+                "fitPaper": true
+            }),
+            4,
+        )
+        .unwrap();
+        assert_eq!(o.margin, Some(216.0));
+        assert_eq!(o.scale, 10.0);
+        assert_eq!(o.header.as_deref(), Some("Review"));
+        assert_eq!(o.footer.as_deref(), Some("Confidential"));
+        assert!(o.page_numbers && o.fit_paper);
+        let long = "x".repeat(500);
+        let o = pdf_options(&json!({"header": long}), 1).unwrap();
+        assert_eq!(o.header.as_deref().map(str::len), Some(200));
+        let o = pdf_options(&json!({}), 1).unwrap();
+        assert_eq!(o.margin, None);
+        assert_eq!(o.scale, 100.0);
+        assert!(!o.page_numbers && !o.fit_paper);
     }
 }

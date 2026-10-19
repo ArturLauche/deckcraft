@@ -22,6 +22,7 @@ pub mod notes;
 pub mod opening;
 pub mod panes;
 mod preview;
+pub mod print;
 pub mod qat;
 pub mod ribbon;
 pub mod selpane;
@@ -400,7 +401,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         "app.print",
         "Print",
         Some("Cmd+P"),
-        "{layout?, perPage?, slides?, includeHidden?, frame?, paper?: letter|a4|legal|a3, orientation?: portrait|landscape}",
+        "{layout?, perPage?, slides?, includeHidden?, frame?, paper?: letter|a4|legal|a3, orientation?: portrait|landscape, margin?: points 0-216, scale?: percent 10-200, header?, footer?, pageNumbers?, direct?: bool, fitPaper?}",
     ),
     ("app.about", "About DeckCraft", None, "{}"),
     ("app.palette", "Command Palette", Some("Cmd+Shift+P"), "{}"),
@@ -917,6 +918,7 @@ impl SlideApp {
     pub fn print_pdf(&mut self, params: Value) -> bool {
         let Some((title, doc)) = self.session.active().map(|d| (d.title(), d.doc.clone())) else { return false };
         let mut params = if params.is_object() { params } else { json!({}) };
+        let direct = params.get("direct").and_then(Value::as_bool).unwrap_or(false);
         if self.services.pick_save.is_none() {
             // Web: the browser hands the PDF to the user.
             let bytes = deckcraft_engine::cmd::file::pdf_bytes(&doc, &params);
@@ -925,13 +927,24 @@ impl SlideApp {
         let safe: String = title.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();
         let path = std::env::temp_dir().join(format!("{safe} (print).pdf")).to_string_lossy().to_string();
         if let Some(o) = params.as_object_mut() {
+            o.remove("direct");
             o.insert("path".into(), json!(path));
             o.insert("format".into(), json!("pdf"));
         }
         match self.run("file.export", params) {
             Ok(_) => {
+                if direct {
+                    match crate::print::send_to_printer(&path) {
+                        Ok(()) => {
+                            self.set_status("Sent the presentation to the default printer");
+                            return true;
+                        }
+                        Err(e) => self.set_status(format!("Couldn't print directly ({e}); opened the PDF instead")),
+                    }
+                } else {
+                    self.set_status("Opened the presentation as a PDF to print");
+                }
                 self.open_url(&format!("file:///{}", path.replace('\\', "/").trim_start_matches('/')));
-                self.set_status("Opened the presentation as a PDF to print");
                 true
             }
             Err(_) => false,

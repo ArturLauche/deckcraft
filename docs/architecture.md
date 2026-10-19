@@ -113,7 +113,10 @@ transition and only composites cached textures each frame; `render::composite_tr
 CPU twin used by `deckcraft-cli render-transition` and the tests. The show window and the presenter view are egui viewports; animation state per shape
 comes from `anim::timeline` each frame. Animations ▸ Preview plays that same state on the editor
 canvas for the current slide, then draws the slide at rest. PDF export renders each slide at print resolution and
-overlays an invisible real-text layer with embedded font subsets.
+overlays an invisible real-text layer with embedded font subsets. Print shares that writer, with
+margins, scaling, custom header/footer, page numbers and optional fit-to-paper; the desktop app
+opens the PDF or, on Unix with CUPS, sends it directly with `lp` (the path is a process argument,
+never a shell string).
 
 ## File I/O
 

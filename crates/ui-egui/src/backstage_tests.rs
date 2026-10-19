@@ -555,6 +555,11 @@ fn print_slides_follow_the_settings() {
     assert_eq!(print_params(&bs, &[1, 3])["perPage"], 6);
     assert_eq!(print_params(&bs, &[1, 3])["layout"], "handouts");
     assert_eq!(print_params(&bs, &[1])["paper"], "letter");
+    assert_eq!(print_params(&bs, &[1])["margin"], 36.0);
+    assert_eq!(print_params(&bs, &[1])["scale"], 100.0);
+    assert_eq!(print_params(&bs, &[1])["pageNumbers"], true);
+    assert_eq!(print_params(&bs, &[1])["direct"], false);
+    assert_eq!(print_params(&bs, &[1])["fitPaper"], false);
     assert_eq!(print_page_size(&bs, &doc), (612.0, 792.0));
     bs.print_paper = "a4";
     bs.print_landscape = true;
@@ -563,4 +568,12 @@ fn print_slides_follow_the_settings() {
     assert!((w - 841.89).abs() < 0.01 && (h - 595.28).abs() < 0.01);
     bs.print_layout = "slides";
     assert_eq!(print_page_size(&bs, &doc), (doc.slide_size.width as f32, doc.slide_size.height as f32), "slides print slide-shaped");
+    bs.print_fit_paper = true;
+    assert_eq!(print_params(&bs, &[1])["fitPaper"], true);
+    let (w, h) = print_page_size(&bs, &doc);
+    assert!((w - 841.89).abs() < 0.01 && (h - 595.28).abs() < 0.01, "fit-to-paper uses the chosen paper");
+    bs.print_margin = 500.0;
+    bs.print_scale = 1.0;
+    assert_eq!(print_params(&bs, &[1])["margin"], 216.0);
+    assert_eq!(print_params(&bs, &[1])["scale"], 10.0);
 }

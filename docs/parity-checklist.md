@@ -1,6 +1,6 @@
 # PowerPoint feature checklist
 
-> **Generated:** 2026-10-19 (summary by `cargo xtask parity`; real-time co-authoring re-scored partial after the shared-folder journal landed; video, print, template gallery, settings sync and share links re-scored after the 2026-10-19 feature arc; earlier rows re-scored by the 2026-10-14 community PR wave and 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Generated:** 2026-10-19 (summary by `cargo xtask parity`; print re-scored after margins/scaling/header-footer/direct `lp` landed; real-time co-authoring partial after the shared-folder journal; video, template gallery, settings sync and share links re-scored after the 2026-10-19 feature arc; earlier rows re-scored by the 2026-10-14 community PR wave and 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
 **Weighted breadth parity: 84%** over 195 features.
@@ -68,7 +68,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Files | Export slides as PNG/JPEG | P0 | D |
 | Files | Export outline / RTF | P2 | P |
 | Files | Export video (MP4/WebM through ffmpeg) / animated GIF (GIF: one frame per slide, no transitions) | P2 | P |
-| Files | Print (slides, handouts, notes; PDF path with colour modes; no native print sheet or margins) | P1 | P |
+| Files | Print (slides, handouts, notes; PDF path with colour modes, margins, scaling, header/footer and page numbers, direct `lp`; no per-platform print sheet) | P1 | P |
 | Files | Password protection | P2 | M |
 | Files | Reuse slides from another file | P1 | P |
 | Files | Drag and drop files onto the window | P1 | D |
