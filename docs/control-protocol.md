@@ -54,13 +54,15 @@ Coordinates are slide points (1/72 inch; a 16:9 slide is 960 × 540) unless note
 ### Live collaboration
 
 The `collab.*` commands are ordinary `engine.execute` commands, so the control channel, CLI and
-MCP drive a live session exactly as the Share page does. `folder` is the shared folder; `name` is
-shown to the other peers; `role` is `editor`, `commenter` or `viewer`. `collab.start` writes the
-first snapshot and fails if the folder already has one (use `collab.join`). The session is tied to
-the open document: open, close or revert only after `collab.leave`.
+MCP drive a live session exactly as the Share page does. Pass `folder` for a shared folder, or
+`relay` (`host:port`), `room` and `token` for a self-hosted relay; `name` is shown to the other
+peers; `role` is `editor`, `commenter` or `viewer`. `collab.start` writes the first snapshot and
+fails if the folder/room already has one (use `collab.join`). The session is tied to the open
+document: open, close or revert only after `collab.leave`.
 
 ```json
 {"id": 1, "method": "engine.execute", "params": {"command": "collab.start", "params": {"folder": "/shared/talk.deckcraft.collab", "name": "Ada"}}}
+{"id": 5, "method": "engine.execute", "params": {"command": "collab.start", "params": {"relay": "relay.example:8787", "room": "talk", "token": "room secret", "name": "Ada"}}}
 {"id": 2, "method": "engine.execute", "params": {"command": "collab.cursor", "params": {"slide": 0, "x": 0.5, "y": 0.25}}}
 {"id": 3, "method": "engine.execute", "params": {"command": "collab.status", "params": {}}}
 {"id": 4, "method": "engine.execute", "params": {"command": "collab.leave", "params": {}}}

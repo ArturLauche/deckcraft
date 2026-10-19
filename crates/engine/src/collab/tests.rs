@@ -191,3 +191,138 @@ fn default_folder_sits_beside_the_deck() {
     assert_eq!(Role::parse("EDITOR"), Some(Role::Editor));
     assert_eq!(Role::parse("owner"), None);
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_relay_carries_commands_presence_and_rejects_a_bad_token() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let root = temp_dir("relay-server");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let stop = Arc::new(AtomicBool::new(false));
+    let server_root = root.clone();
+    let server_stop = Arc::clone(&stop);
+    let server = std::thread::spawn(move || {
+        super::relay::serve_until(listener, server_root, "room secret".into(), server_stop).unwrap();
+    });
+
+    let mut h = Session::with_new();
+    h.execute("collab.start", &json!({"relay": addr, "room": "deck", "token": "room secret", "name": "Host"})).unwrap();
+    let mut g = Session::with_new();
+    g.execute("collab.join", &json!({"relay": addr, "room": "deck", "token": "room secret", "name": "Guest"})).unwrap();
+    h.collab_tick().unwrap();
+    g.collab_tick().unwrap();
+    let base = text_shapes(&g);
+
+    h.execute("insert.textBox", &json!({"rect": [40, 40, 400, 80], "text": "Over relay"})).unwrap();
+    g.collab_tick().unwrap();
+    assert_eq!(text_shapes(&g), base + 1, "the guest applied the host's relayed command");
+
+    g.execute("collab.cursor", &json!({"slide": 0, "x": 0.25, "y": 0.75})).unwrap();
+    h.collab_tick().unwrap();
+    let status = h.collab_status().unwrap();
+    assert!(status.folder.starts_with("relay://"), "{}", status.folder);
+    let guest = status.peers.iter().find(|p| p.name == "Guest").expect("guest presence crosses the relay");
+    assert_eq!(guest.slide, Some(0));
+    assert!((guest.x.unwrap_or_default() - 0.25).abs() < 0.001);
+
+    let mut bad = Session::with_new();
+    let err = bad.execute("collab.join", &json!({"relay": addr, "room": "deck", "token": "wrong", "name": "Bad"})).unwrap_err();
+    assert!(err.to_string().contains("bad room token"), "{err}");
+    let mut other = Session::with_new();
+    let err = other.execute("collab.start", &json!({"relay": addr, "room": "deck", "token": "room secret"})).unwrap_err();
+    assert!(err.to_string().contains("already has a live session"), "{err}");
+
+    h.execute("collab.leave", &json!({})).unwrap();
+    g.execute("collab.leave", &json!({})).unwrap();
+    stop.store(true, Ordering::Relaxed);
+    server.join().unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_relay_room_survives_a_server_restart() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let root = temp_dir("relay-restart");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let stop = Arc::new(AtomicBool::new(false));
+    let server = {
+        let root = root.clone();
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || super::relay::serve_until(listener, root, "secret".into(), stop).unwrap())
+    };
+    let mut h = Session::with_new();
+    h.execute("collab.start", &json!({"relay": addr, "room": "persist", "token": "secret", "name": "Host"})).unwrap();
+    h.execute("insert.textBox", &json!({"rect": [40, 40, 400, 80], "text": "Saved on the relay"})).unwrap();
+    h.execute("collab.leave", &json!({})).unwrap();
+    stop.store(true, Ordering::Relaxed);
+    server.join().unwrap();
+
+    let listener = std::net::TcpListener::bind(&addr).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let server = {
+        let root = root.clone();
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || super::relay::serve_until(listener, root, "secret".into(), stop).unwrap())
+    };
+    let mut g = Session::with_new();
+    g.execute("collab.join", &json!({"relay": addr, "room": "persist", "token": "secret", "name": "Guest"})).unwrap();
+    assert!(text_shapes(&g) >= 1, "the snapshot survived the restart");
+    g.execute("collab.leave", &json!({})).unwrap();
+    stop.store(true, Ordering::Relaxed);
+    server.join().unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_relay_rejects_bad_tokens_and_path_traversal() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let root = temp_dir("relay-guard");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let stop = Arc::new(AtomicBool::new(false));
+    let server_root = root.clone();
+    let server_stop = Arc::clone(&stop);
+    let server = std::thread::spawn(move || super::relay::serve_until(listener, server_root, "secret".into(), server_stop).unwrap());
+    let ask = |request: serde_json::Value| -> serde_json::Value {
+        let mut stream = std::net::TcpStream::connect(&addr).unwrap();
+        stream.write_all(request.to_string().as_bytes()).unwrap();
+        stream.write_all(b"\n").unwrap();
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap()
+    };
+    let bad = ask(json!({"op": "write", "room": "deck", "token": "wrong", "name": "a", "data": "aGk="}));
+    assert_eq!(bad["ok"], false);
+    assert_eq!(bad["error"], "bad room token");
+    let traversal = ask(json!({"op": "write", "room": "deck", "token": "secret", "name": "../escape", "data": "aGk="}));
+    assert_eq!(traversal["ok"], false);
+    assert_eq!(traversal["error"], "bad file name");
+    assert!(!root.join("escape").exists(), "nothing was written outside the room");
+    let ok = ask(json!({"op": "write", "room": "deck", "token": "secret", "name": "note.txt", "data": "aGk="}));
+    assert_eq!(ok["ok"], true);
+    let read = ask(json!({"op": "read", "room": "deck", "token": "secret", "name": "note.txt"}));
+    assert_eq!(read["data"], "aGk=");
+    stop.store(true, Ordering::Relaxed);
+    server.join().unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn relay_commands_require_a_room_and_a_token_before_connecting() {
+    let mut s = Session::with_new();
+    let err = s.execute("collab.start", &json!({"relay": "127.0.0.1:1", "token": "secret"})).unwrap_err();
+    assert!(err.to_string().contains("needs `room`"), "{err}");
+    let err = s.execute("collab.join", &json!({"relay": "127.0.0.1:1", "room": "deck"})).unwrap_err();
+    assert!(err.to_string().contains("needs `token`"), "{err}");
+}

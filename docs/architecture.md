@@ -1,10 +1,10 @@
 # DeckCraft architecture
 
-> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (shared-folder live collaboration with presence, cursors, role enforcement and snapshot undo; previous: video export, the format registry, share links and settings sync) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (live collaboration over a shared folder or a self-hosted TCP relay, with presence, cursors, role enforcement and snapshot undo; previous: video export, the format registry, share links and settings sync) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft is built today. The binding rules (layering, everything is a command, thin UI, never
 break wasm, never crash) are in [AGENTS.md](../AGENTS.md) §3–§5; this document describes what
-exists. 213k lines of Rust in 24 crates, 3 apps and `xtask`; 1,796 `#[test]` functions
+exists. 216k lines of Rust in 24 crates, 3 apps and `xtask`; 1,812 `#[test]` functions
 (`cargo xtask stats` counts them per crate).
 
 ## Layers
@@ -20,7 +20,7 @@ nothing below L6 uses egui, eframe, winit or rfd.
 | L2 | `text`, `anim`, `format`, `media` | Shaping (HarfRust), UAX #9 bidi, UAX #14 line breaking, autofit, caret hit testing; per-shape animation state over time, the show state machine, transition frame layouts, Morph matching; `.deckcraft` (zip + JSON + media) and outline text; media probing, decoding, mixer and clock |
 | L3 | `render`, `pptx` | `vello_cpu` raster of slides, masters and layouts (fills, outlines, effects, pictures, tables, charts, Morph frames); PPTX import/export from ECMA-376 |
 | L4 | `pdf` | App-owned export layout and rendering through the shared `craft-pdf` writer |
-| L5 | `engine` | Sessions, documents, selection, undo history on shared slide snapshots, the command registry (`cmd/*`), pointer tools, keys, AutoRecover, the panic guard (`guard.rs`), the format registry (`formats.rs`), video timelines (`video_export.rs`), share links and access (`sharing.rs`, `cmd/share.rs`), settings sync (`sync.rs`) and shared-folder live collaboration (`collab.rs`, `cmd/collab.rs`) |
+| L5 | `engine` | Sessions, documents, selection, undo history on shared slide snapshots, the command registry (`cmd/*`), pointer tools, keys, AutoRecover, the panic guard (`guard.rs`), the format registry (`formats.rs`), video timelines (`video_export.rs`), share links and access (`sharing.rs`, `cmd/share.rs`), settings sync (`sync.rs`) and live collaboration over a folder or TCP relay (`collab.rs`, `collab/relay.rs`, `cmd/collab.rs`) |
 | L6 | `ui-egui`, `mcp` | The PowerPoint-style interface (ribbon with 10 tabs + contextual tabs, canvas, thumbnails, panes, 41 dialogs, show and presenter windows, the JSON control channel); the MCP server (JSON-RPC 2.0 over stdio), headless or connected to a running app |
 | apps | `deckcraft` (desktop: eframe/wgpu, cpal audio, logging), `deckcraft-cli` (run, render, convert, mcp, app), `deckcraft-web` (trunk; WebGPU with WebGL2 fallback), `xtask` | Exempt from layering |
 
@@ -70,12 +70,14 @@ error. The passphrase lives in the same owner-only config so automatic sync can 
 
 ## Live collaboration
 
-`collab.rs` is a shared-folder journal, not a server: every peer appends commands to
-`journal-<peer>.jsonl` in a folder beside the deck, writes presence and its pointer to
-`peer-<peer>.json`, and reads the other peers' files. `snapshot.json` is the full document at a
-known revision. `collab.start` writes the first snapshot; `collab.join` adopts the latest one and
-tails the journals. The UI polls every 150 ms, so a shared drive, a Syncthing folder or a network
-share is enough and the deck keeps working offline.
+`collab.rs` is a journal protocol over a small `Store` abstraction. Every peer appends commands to
+`journal-<peer>.jsonl`, writes presence and its pointer to `peer-<peer>.json`, and reads the other
+peers' files; `snapshot.json` is the full document at a known revision. `collab.start` writes the
+first snapshot; `collab.join` adopts the latest one and tails the journals. The folder store is the
+offline default: a shared drive, a Syncthing folder or a network share is enough. The relay store
+speaks the same operations over newline-delimited JSON to `deckcraft-cli relay`, which keeps one
+room directory per token and bounds request and file sizes. The UI polls every 150 ms in both
+cases.
 
 Each journal entry carries a sequence, timestamp, peer id, role and the normal command id and
 params. Peers apply entries through `Session::execute_remote`, which skips the journal echo and the
@@ -90,9 +92,10 @@ carry the cursor's slide and normalized position; the canvas draws remote pointe
 colour.
 
 The limits are explicit: two edits to the same text at the same instant are ordered by timestamp
-(the later command wins), not merged by a CRDT; a relay for teams that cannot share a folder is the
-next step; and the folder's filesystem permissions, not a capability token, are the outer security
-boundary. `docs/gaps.md` tracks those remaining pieces.
+(the later command wins), not merged by a CRDT. A folder's filesystem permissions are its outer
+security boundary; a relay instead requires the room token on every request, but speaks plain TCP,
+so a public deployment needs TLS at a reverse proxy and a per-user identity is still open.
+`docs/gaps.md` tracks those remaining pieces.
 
 ## Video export
 
@@ -149,6 +152,8 @@ macOS, Windows, Linux, FreeBSD and web artifacts.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Live collaboration runs on a `Store` abstraction: shared folder or self-hosted TCP relay with room tokens and persistence. 333 commands, 216k lines, 1,812 tests |
+| 2026-10-19 | minor | Optional AES-256-GCM/Argon2id encryption for settings sync, with plaintext migration |
 | 2026-10-19 | minor | Shared-folder live collaboration: ordered journals, role enforcement, presence/cursors, snapshot undo and recovery. 333 commands, 213k lines, 1,796 tests |
 | 2026-10-19 | minor | Format registry, video export worker, share links with engine-level access enforcement, and opt-in settings sync (folder/S3/Drive). 328 commands, 212k lines, 1,786 tests |
 | 2026-10-14 | minor | Community PR wave folded: one L2/L5/L6 row each; command registry 320 (`cmd!` registrations in `cmd/*`), 41 dialogs (titled in `dialogs.rs`), 202k lines, 24 crates (`metafile` added at L0), 1,641 tests. The per-PR rows below give the counts each PR saw on its own branch |
@@ -172,4 +177,3 @@ shaping for notes and footers; slide layout, rasterization, font selection, text
 links and outlines remain app-owned. PDF embedding and all Hayro production dependencies
 are disabled. Native builds enable parallel compression on the same pinned Krilla backend;
 WASM keeps it disabled. Generated-PDF assertions use a std-only parser as a development dependency.
-| 2026-10-19 | minor | Optional AES-256-GCM/Argon2id encryption for settings sync, with plaintext migration |

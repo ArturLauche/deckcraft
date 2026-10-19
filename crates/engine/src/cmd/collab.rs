@@ -5,7 +5,7 @@
 use serde_json::{Value, json};
 
 use super::*;
-use crate::collab::{self, Role};
+use crate::collab::{self, Role, Store};
 use crate::{Result, Session};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -15,7 +15,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Start Live Session",
             ["File", "Share"],
             None,
-            "{folder?, role?: editor|commenter|viewer, name?} → {live, folder, peer, name, role, revision, peers}",
+            "{folder?, relay?: host:port, room?, token?, role?: editor|commenter|viewer, name?} → {live, folder, peer, name, role, revision, peers}",
             has_doc,
             start
         ),
@@ -24,7 +24,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Join Live Session",
             ["File", "Share"],
             None,
-            "{folder, role?: editor|commenter|viewer, name?} → {live, folder, peer, name, role, revision, peers}",
+            "{folder?, relay?: host:port, room?, token?, role?: editor|commenter|viewer, name?} → {live, folder, peer, name, role, revision, peers}",
             has_doc,
             join
         ),
@@ -68,26 +68,54 @@ fn full_access(s: &Session) -> Result<()> {
     Ok(())
 }
 
+/// `relay`, `room` and `token`, all required together. Returns `None` for a folder session.
+fn relay_params(p: &Value) -> Result<Option<(String, String, String)>> {
+    let Some(relay) = p.get("relay").and_then(Value::as_str).map(str::trim).filter(|r| !r.is_empty()) else {
+        return Ok(None);
+    };
+    let room = p
+        .get("room")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .ok_or_else(|| bad("collab", "a relay session needs `room`"))?;
+    let token = p
+        .get("token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| bad("collab", "a relay session needs `token`"))?;
+    Ok(Some((relay.to_string(), room.to_string(), token.to_string())))
+}
+
 fn start(s: &mut Session, p: &Value) -> Result<Value> {
     full_access(s)?;
     if s.collab.is_some() {
         return Err(bad("collab", "this presentation is already in a live session; leave it first"));
     }
     let doc = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
-    let dir = match p.get("folder").and_then(Value::as_str).map(str::trim).filter(|f| !f.is_empty()) {
-        Some(folder) => std::path::PathBuf::from(folder),
-        None => {
-            let path = s
-                .active()
-                .and_then(|d| d.path.clone())
-                .ok_or_else(|| EngineError::Other("save the presentation before starting a live session, or choose a folder".into()))?;
-            collab::default_dir(&path)
+    let c = if let Some((relay, room, token)) = relay_params(p)? {
+        let mut store: Box<dyn Store> = Box::new(collab::relay::RelayStore::new(&relay, &room, &token)?);
+        if store.read(collab::SNAPSHOT_FILE)?.is_some() {
+            return Err(bad("collab", "that relay room already has a live session; use Join instead of Start"));
         }
+        collab::Collab::start_store(store, role(p)?, name(s, p), Some(&doc))?
+    } else {
+        let dir = match p.get("folder").and_then(Value::as_str).map(str::trim).filter(|f| !f.is_empty()) {
+            Some(folder) => std::path::PathBuf::from(folder),
+            None => {
+                let path = s
+                    .active()
+                    .and_then(|d| d.path.clone())
+                    .ok_or_else(|| EngineError::Other("save the presentation before starting a live session, or choose a folder".into()))?;
+                collab::default_dir(&path)
+            }
+        };
+        if collab::snapshot_exists(&dir) {
+            return Err(bad("collab", "that folder already has a live session; use Join instead of Start"));
+        }
+        collab::Collab::start(dir, role(p)?, name(s, p), Some(&doc))?
     };
-    if collab::snapshot_exists(&dir) {
-        return Err(bad("collab", "that folder already has a live session; use Join instead of Start"));
-    }
-    let c = collab::Collab::start(dir, role(p)?, name(s, p), Some(&doc))?;
     let out = serde_json::to_value(c.status()).map_err(|e| EngineError::Other(e.to_string()))?;
     s.collab = Some(c);
     Ok(out)
@@ -98,9 +126,18 @@ fn join(s: &mut Session, p: &Value) -> Result<Value> {
     if s.collab.is_some() {
         return Err(bad("collab", "this presentation is already in a live session; leave it first"));
     }
-    let folder =
-        p.get("folder").and_then(Value::as_str).map(str::trim).filter(|f| !f.is_empty()).ok_or_else(|| bad("collab.join", "missing `folder`"))?;
-    let (c, doc) = collab::Collab::join(std::path::PathBuf::from(folder), role(p)?, name(s, p))?;
+    let (c, doc) = if let Some((relay, room, token)) = relay_params(p)? {
+        let store: Box<dyn Store> = Box::new(collab::relay::RelayStore::new(&relay, &room, &token)?);
+        collab::Collab::join_store(store, role(p)?, name(s, p))?
+    } else {
+        let folder = p
+            .get("folder")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+            .ok_or_else(|| bad("collab.join", "missing `folder`, or pass `relay`, `room` and `token`"))?;
+        collab::Collab::join(std::path::PathBuf::from(folder), role(p)?, name(s, p))?
+    };
     s.adopt_remote_document(doc)?;
     let out = serde_json::to_value(c.status()).map_err(|e| EngineError::Other(e.to_string()))?;
     s.collab = Some(c);

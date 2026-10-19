@@ -21,8 +21,13 @@ pub struct State {
     /// 0 means never; otherwise hours.
     pub expiry_hours: u32,
     pub name: String,
-    /// Live session fields: the journal folder, the name shown to other peers, and the role.
+    /// Live session fields: the journal folder, the optional relay, the name shown to other
+    /// peers, and the role.
     pub collab_folder: String,
+    pub collab_relay: String,
+    pub collab_room: String,
+    pub collab_token: String,
+    pub collab_use_relay: bool,
     pub collab_name: String,
     pub collab_role: Role,
 }
@@ -37,6 +42,10 @@ impl Default for State {
             expiry_hours: 0,
             name: String::new(),
             collab_folder: String::new(),
+            collab_relay: "127.0.0.1:8787".into(),
+            collab_room: "deck".into(),
+            collab_token: String::new(),
+            collab_use_relay: false,
             collab_name: String::new(),
             collab_role: Role::Editor,
         }
@@ -245,7 +254,7 @@ fn collab_section(app: &mut SlideApp, ui: &mut Ui, state: &mut State) {
     ui.label(egui::RichText::new("Live session").font(crate::theme::bold(14.0)));
     ui.label(
         egui::RichText::new(
-            "Share a folder with the other editors. Commands, presence and pointers travel through it; the presentation keeps working offline and catches up when the folder is reachable.",
+            "Share a folder, or run `deckcraft-cli relay` and use its address. Commands, presence and pointers travel through it; a folder keeps working offline and catches up when it is reachable.",
         )
         .font(crate::theme::font(12.0)),
     );
@@ -264,9 +273,9 @@ fn collab_section(app: &mut SlideApp, ui: &mut Ui, state: &mut State) {
             ui.label(egui::RichText::new("Live:").font(crate::theme::bold(12.5)));
             ui.label(egui::RichText::new(&status.folder).font(crate::theme::font(12.0)));
             ui.label(egui::RichText::new(format!("revision {}", status.revision)).font(crate::theme::font(11.5)));
-            if ui.button("Copy folder").clicked() {
+            if ui.button("Copy location").clicked() {
                 ui.ctx().copy_text(status.folder.clone());
-                state.status = "Live folder copied to the clipboard.".into();
+                state.status = "Live session location copied to the clipboard.".into();
             }
             if ui.button("Leave").clicked() && run(app, state, "collab.leave", json!({})) {
                 state.status = "Left the live session.".into();
@@ -291,10 +300,25 @@ fn collab_section(app: &mut SlideApp, ui: &mut Ui, state: &mut State) {
         }
     } else {
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.add_sized(vec2(90.0, 20.0), egui::Label::new("Folder:"));
-            ui.add(egui::TextEdit::singleline(&mut state.collab_folder).hint_text("A shared folder").desired_width(360.0));
-        });
+        ui.checkbox(&mut state.collab_use_relay, "Use a self-hosted relay instead of a shared folder");
+        if state.collab_use_relay {
+            ui.horizontal(|ui| {
+                ui.add_sized(vec2(90.0, 20.0), egui::Label::new("Relay:"));
+                ui.add(egui::TextEdit::singleline(&mut state.collab_relay).hint_text("host:port").desired_width(220.0));
+                ui.add_sized(vec2(50.0, 20.0), egui::Label::new("Room:"));
+                ui.add(egui::TextEdit::singleline(&mut state.collab_room).hint_text("deck").desired_width(120.0));
+            });
+            ui.horizontal(|ui| {
+                ui.add_sized(vec2(90.0, 20.0), egui::Label::new("Token:"));
+                ui.add(egui::TextEdit::singleline(&mut state.collab_token).hint_text("Room token").password(true).desired_width(220.0));
+                ui.label(egui::RichText::new("The relay needs the same token for every peer.").font(crate::theme::font(11.5)));
+            });
+        } else {
+            ui.horizontal(|ui| {
+                ui.add_sized(vec2(90.0, 20.0), egui::Label::new("Folder:"));
+                ui.add(egui::TextEdit::singleline(&mut state.collab_folder).hint_text("A shared folder").desired_width(360.0));
+            });
+        }
         ui.horizontal(|ui| {
             ui.add_sized(vec2(90.0, 20.0), egui::Label::new("Your name:"));
             ui.add(egui::TextEdit::singleline(&mut state.collab_name).desired_width(180.0));
@@ -306,25 +330,36 @@ fn collab_section(app: &mut SlideApp, ui: &mut Ui, state: &mut State) {
             });
         });
         ui.horizontal(|ui| {
-            let params = json!({
-                "folder": state.collab_folder.trim(),
-                "name": state.collab_name.trim(),
-                "role": state.collab_role.id(),
-            });
-            if ui.add_enabled(!state.collab_folder.trim().is_empty(), egui::Button::new("Start new session")).clicked()
-                && run(app, state, "collab.start", params.clone())
-            {
-                state.status = "Live session started. Share the folder with the other editors.".into();
+            let params = if state.collab_use_relay {
+                json!({
+                    "relay": state.collab_relay.trim(),
+                    "room": state.collab_room.trim(),
+                    "token": state.collab_token,
+                    "name": state.collab_name.trim(),
+                    "role": state.collab_role.id(),
+                })
+            } else {
+                json!({
+                    "folder": state.collab_folder.trim(),
+                    "name": state.collab_name.trim(),
+                    "role": state.collab_role.id(),
+                })
+            };
+            let ready = if state.collab_use_relay {
+                !state.collab_relay.trim().is_empty() && !state.collab_room.trim().is_empty() && !state.collab_token.trim().is_empty()
+            } else {
+                !state.collab_folder.trim().is_empty()
+            };
+            if ui.add_enabled(ready, egui::Button::new("Start new session")).clicked() && run(app, state, "collab.start", params.clone()) {
+                state.status = "Live session started. Share the folder or relay details with the other editors.".into();
             }
-            if ui.add_enabled(!state.collab_folder.trim().is_empty(), egui::Button::new("Join session")).clicked()
-                && run(app, state, "collab.join", params)
-            {
+            if ui.add_enabled(ready, egui::Button::new("Join session")).clicked() && run(app, state, "collab.join", params) {
                 state.status = "Joined the live session.".into();
             }
         });
         ui.label(
             egui::RichText::new(
-                "Start on the first copy; Join opens the latest snapshot and applies the journal. A socket relay is the next step for teams that cannot share a folder.",
+                "Start on the first copy; Join opens the latest snapshot and applies the journal. A relay serves the same journal over TCP for teams that cannot share a folder; it is still last-writer-wins, not a CRDT.",
             )
             .font(crate::theme::font(11.5)),
         );
@@ -367,6 +402,55 @@ mod tests {
         h.run_steps(3);
         assert!(h.query_all_by_label_contains("Revoked").next().is_some(), "the revoked link is marked");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_share_page_starts_a_relay_session() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let root = std::env::temp_dir().join(format!("deckcraft-relay-ui-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let stop = Arc::new(AtomicBool::new(false));
+        let server_root = root.clone();
+        let server_stop = Arc::clone(&stop);
+        let server = std::thread::spawn(move || {
+            deckcraft_engine::collab::relay::serve_until(listener, server_root, "ui secret".into(), server_stop).unwrap();
+        });
+
+        let dir = root.join("deck");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("talk.deckcraft");
+        let mut app = SlideApp::new(deckcraft_engine::Session::with_new(), crate::Services::default());
+        app.run("file.saveAs", json!({"path": path.to_string_lossy()})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1400.0, 1000.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(3);
+        h.state_mut().run("app.backstage", json!({"page": "share"})).unwrap();
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("Use a self-hosted relay").next().is_some(), "the relay switch is drawn");
+        let share = &mut h.state_mut().backstage.as_mut().unwrap().share;
+        share.collab_use_relay = true;
+        share.collab_relay = addr.clone();
+        share.collab_room = "ui".into();
+        share.collab_token = "ui secret".into();
+        share.collab_name = "Host".into();
+        h.state_mut().run("collab.start", json!({"relay": addr, "room": "ui", "token": "ui secret", "name": "Host"})).unwrap();
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("relay://").next().is_some(), "the relay location is shown");
+        assert!(h.query_all_by_label_contains("Host (you)").next().is_some(), "the relay peer is listed");
+        h.state_mut().run("collab.leave", json!({})).unwrap();
+        stop.store(true, Ordering::Relaxed);
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -9,9 +9,10 @@
 //! fresh history. Presence and cursors are small per-peer JSON files. A peer that falls behind
 //! requests a snapshot; an editor answers with one, and the others reload it.
 //!
-//! This is deliberately a shared-folder protocol, not a CRDT: two edits to the same text at the
-//! same instant are ordered by their timestamps, and the later command wins. The next step after
-//! this module is a socket relay that speaks the same journal entries in real time.
+//! This is deliberately a journal protocol, not a CRDT: two edits to the same text at the same
+//! instant are ordered by their timestamps, and the later command wins. The same journal also runs
+//! over a self-hosted TCP relay (`collab::relay`), which stores the room's files and serves them
+//! to peers in real time; the folder transport remains the offline default.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -24,6 +25,52 @@ use serde_json::Value;
 
 use crate::{EngineError, Result, Session};
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod relay;
+
+/// The browser has no TCP sockets. The relay exists so the command registry and shared code
+/// compile; every operation explains that a relay needs the desktop app.
+#[cfg(target_arch = "wasm32")]
+pub mod relay {
+    use super::Store;
+    use crate::{EngineError, Result};
+
+    pub struct RelayStore;
+
+    impl RelayStore {
+        pub fn new(_endpoint: &str, _room: &str, _token: &str) -> Result<Self> {
+            Err(EngineError::Other("live collaboration over a relay needs the desktop app".into()))
+        }
+    }
+
+    impl Store for RelayStore {
+        fn describe(&self) -> String {
+            "relay (unavailable in the browser)".into()
+        }
+        fn prepare(&mut self) -> Result<()> {
+            Err(EngineError::Other("live collaboration over a relay needs the desktop app".into()))
+        }
+        fn read(&mut self, _name: &str) -> Result<Option<Vec<u8>>> {
+            Err(EngineError::Other("live collaboration over a relay needs the desktop app".into()))
+        }
+        fn write(&mut self, _name: &str, _bytes: &[u8]) -> Result<()> {
+            Err(EngineError::Other("live collaboration over a relay needs the desktop app".into()))
+        }
+        fn append(&mut self, _name: &str, _bytes: &[u8]) -> Result<()> {
+            Err(EngineError::Other("live collaboration over a relay needs the desktop app".into()))
+        }
+        fn len(&mut self, _name: &str) -> Result<Option<u64>> {
+            Err(EngineError::Other("live collaboration over a relay needs the desktop app".into()))
+        }
+        fn list(&mut self) -> Result<Vec<String>> {
+            Err(EngineError::Other("live collaboration over a relay needs the desktop app".into()))
+        }
+        fn remove(&mut self, _name: &str) -> Result<()> {
+            Err(EngineError::Other("live collaboration over a relay needs the desktop app".into()))
+        }
+    }
+}
+
 /// Folder beside the presentation, e.g. `talk.deckcraft.collab/`.
 pub const DIR_SUFFIX: &str = ".collab";
 pub const SNAPSHOT_FILE: &str = "snapshot.json";
@@ -35,6 +82,74 @@ const HEARTBEAT_MS: i64 = 1_000;
 const MAX_SNAPSHOT_BYTES: usize = 32 << 20;
 const MAX_JOURNAL_BYTES: usize = 32 << 20;
 const MAX_PEERS: usize = 64;
+
+/// Where a live session's snapshot, journals and presence files live. The folder transport is the
+/// offline default; the relay transport speaks the same file operations over TCP.
+pub trait Store: Send {
+    /// A short location for the Share page and status bar.
+    fn describe(&self) -> String;
+    /// Create the room/folder if needed. Called once when a session starts.
+    fn prepare(&mut self) -> Result<()>;
+    fn read(&mut self, name: &str) -> Result<Option<Vec<u8>>>;
+    fn write(&mut self, name: &str, bytes: &[u8]) -> Result<()>;
+    fn append(&mut self, name: &str, bytes: &[u8]) -> Result<()>;
+    fn len(&mut self, name: &str) -> Result<Option<u64>>;
+    fn list(&mut self) -> Result<Vec<String>>;
+    fn remove(&mut self, name: &str) -> Result<()>;
+}
+
+/// A shared folder, network share or Syncthing folder.
+pub struct FolderStore {
+    dir: PathBuf,
+}
+
+impl FolderStore {
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        FolderStore { dir: dir.into() }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.dir
+    }
+}
+
+impl Store for FolderStore {
+    fn describe(&self) -> String {
+        self.dir.to_string_lossy().to_string()
+    }
+
+    fn prepare(&mut self) -> Result<()> {
+        crate::io::create_dir_all(&self.dir).map_err(EngineError::Other)
+    }
+
+    fn read(&mut self, name: &str) -> Result<Option<Vec<u8>>> {
+        crate::io::read_file_optional(&self.dir.join(name).to_string_lossy()).map_err(EngineError::Other)
+    }
+
+    fn write(&mut self, name: &str, bytes: &[u8]) -> Result<()> {
+        crate::io::write_file(&self.dir.join(name).to_string_lossy(), bytes).map_err(EngineError::Other)
+    }
+
+    fn append(&mut self, name: &str, bytes: &[u8]) -> Result<()> {
+        crate::io::append_file(&self.dir.join(name), bytes).map_err(EngineError::Other)
+    }
+
+    fn len(&mut self, name: &str) -> Result<Option<u64>> {
+        Ok(crate::io::file_len(&self.dir.join(name).to_string_lossy()))
+    }
+
+    fn list(&mut self) -> Result<Vec<String>> {
+        let paths = crate::io::read_dir(&self.dir).map_err(EngineError::Other)?;
+        let mut names: Vec<String> = paths.iter().filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(str::to_string)).collect();
+        names.sort();
+        Ok(names)
+    }
+
+    fn remove(&mut self, name: &str) -> Result<()> {
+        crate::io::remove_file(&self.dir.join(name));
+        Ok(())
+    }
+}
 
 /// What a peer may do. The owner of a shared folder can hand a viewer or commenter link to it;
 /// the role is checked here before a local command runs and again when a journal entry is applied.
@@ -168,7 +283,7 @@ pub struct Status {
 
 /// A live shared-folder session owned by one [`Session`].
 pub struct Collab {
-    pub dir: PathBuf,
+    store: Box<dyn Store>,
     pub peer: u64,
     pub name: String,
     pub role: Role,
@@ -186,14 +301,19 @@ pub struct Collab {
 }
 
 impl Collab {
-    /// Start a session in `dir`. `doc` writes the first snapshot when the folder has none. A folder
-    /// that already has a snapshot keeps it; [`Self::join`] is the path that also returns it.
+    /// Start a session in a folder. `doc` writes the first snapshot when the folder has none. A
+    /// folder that already has a snapshot keeps it; [`Self::join`] is the path that also returns it.
     pub fn start(dir: PathBuf, role: Role, name: String, doc: Option<&Presentation>) -> Result<Collab> {
-        crate::io::create_dir_all(&dir).map_err(EngineError::Other)?;
-        let existing = read_snapshot(&dir)?;
+        Self::start_store(Box::new(FolderStore::new(dir)), role, name, doc)
+    }
+
+    /// Start a session on any [`Store`].
+    pub fn start_store(mut store: Box<dyn Store>, role: Role, name: String, doc: Option<&Presentation>) -> Result<Collab> {
+        store.prepare()?;
+        let existing = read_snapshot(store.as_mut())?;
         let peer = new_peer_id();
         let mut c = Collab {
-            dir,
+            store,
             peer,
             name: clean_name(&name),
             role,
@@ -225,8 +345,15 @@ impl Collab {
 
     /// Join a folder that has a snapshot. The caller adopts the returned document before polling.
     pub fn join(dir: PathBuf, role: Role, name: String) -> Result<(Collab, Presentation)> {
-        let snap = read_snapshot(&dir)?.ok_or_else(|| EngineError::Other(format!("{} has no collaboration snapshot yet", dir.display())))?;
-        let mut c = Collab::start(dir, role, name, None)?;
+        Self::join_store(Box::new(FolderStore::new(dir)), role, name)
+    }
+
+    /// Join any [`Store`] that has a snapshot.
+    pub fn join_store(mut store: Box<dyn Store>, role: Role, name: String) -> Result<(Collab, Presentation)> {
+        store.prepare()?;
+        let snap =
+            read_snapshot(store.as_mut())?.ok_or_else(|| EngineError::Other(format!("{} has no collaboration snapshot yet", store.describe())))?;
+        let mut c = Collab::start_store(store, role, name, None)?;
         c.revision = snap.revision;
         c.snapshot_at = snap.saved_at;
         c.seen = snap.seen;
@@ -241,7 +368,7 @@ impl Collab {
         let now = now_ms();
         let snap = Snapshot { version: 1, revision: self.revision, saved_at: now, seen: self.seen.clone(), doc: doc.clone() };
         let bytes = serde_json::to_vec(&snap).map_err(|e| EngineError::Other(format!("can't encode the collaboration snapshot: {e}")))?;
-        crate::io::write_file(&self.dir.join(SNAPSHOT_FILE).to_string_lossy(), &bytes).map_err(EngineError::Other)?;
+        self.store.write(SNAPSHOT_FILE, &bytes)?;
         self.snapshot_at = now;
         self.remember_offsets();
         self.clear_recovery();
@@ -266,9 +393,9 @@ impl Collab {
                 return;
             }
         };
-        let path = self.journal_path(self.peer);
-        if let Err(e) = crate::io::append_file(&path, &line) {
-            self.error = Some(e);
+        let name = self.journal_name(self.peer);
+        if let Err(e) = self.store.append(&name, &line) {
+            self.error = Some(e.to_string());
         }
     }
 
@@ -318,7 +445,7 @@ impl Collab {
         {
             let _ = self.write_snapshot(&doc);
         }
-        crate::io::remove_file(&self.peer_path(self.peer));
+        let _ = self.store.remove(&self.peer_name(self.peer));
     }
 
     pub fn status(&self) -> Status {
@@ -330,7 +457,7 @@ impl Collab {
         peers.sort_by_key(|p| (p.name.to_lowercase(), p.id));
         Status {
             live: true,
-            folder: self.dir.to_string_lossy().to_string(),
+            folder: self.store.describe(),
             peer: self.peer,
             name: self.name.clone(),
             role: self.role,
@@ -340,16 +467,12 @@ impl Collab {
         }
     }
 
-    pub fn peer_file(&self) -> PathBuf {
-        self.peer_path(self.peer)
+    fn journal_name(&self, peer: u64) -> String {
+        format!("{JOURNAL_PREFIX}{peer:016x}.jsonl")
     }
 
-    fn journal_path(&self, peer: u64) -> PathBuf {
-        self.dir.join(format!("{JOURNAL_PREFIX}{peer:016x}.jsonl"))
-    }
-
-    fn peer_path(&self, peer: u64) -> PathBuf {
-        self.dir.join(format!("{PEER_PREFIX}{peer:016x}.json"))
+    fn peer_name(&self, peer: u64) -> String {
+        format!("{PEER_PREFIX}{peer:016x}.json")
     }
 
     fn write_peer(&mut self) {
@@ -366,8 +489,8 @@ impl Collab {
         };
         match serde_json::to_vec(&peer) {
             Ok(bytes) => {
-                if let Err(e) = crate::io::write_file(&self.peer_path(self.peer).to_string_lossy(), &bytes) {
-                    self.error = Some(e);
+                if let Err(e) = self.store.write(&self.peer_name(self.peer), &bytes) {
+                    self.error = Some(e.to_string());
                 }
                 self.peers.insert(self.peer, peer);
             }
@@ -376,14 +499,19 @@ impl Collab {
     }
 
     fn read_peers(&mut self, now: i64) {
-        let Ok(paths) = crate::io::read_dir(&self.dir) else { return };
+        let names = match self.store.list() {
+            Ok(names) => names,
+            Err(e) => {
+                self.error = Some(e.to_string());
+                return;
+            }
+        };
         let mut seen = BTreeMap::new();
-        for path in paths {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        for name in names {
             if !name.starts_with(PEER_PREFIX) || !name.ends_with(".json") {
                 continue;
             }
-            let Ok(Some(bytes)) = crate::io::read_file_optional(&path.to_string_lossy()) else { continue };
+            let Ok(Some(bytes)) = self.store.read(&name) else { continue };
             if bytes.len() > 64 * 1024 {
                 continue;
             }
@@ -402,7 +530,7 @@ impl Collab {
     }
 
     fn adopt_newer_snapshot(&mut self, session: &mut Session) -> Result<()> {
-        let Some(snap) = read_snapshot(&self.dir)? else { return Ok(()) };
+        let Some(snap) = read_snapshot(self.store.as_mut())? else { return Ok(()) };
         if snap.saved_at <= self.snapshot_at && snap.revision <= self.revision {
             return Ok(());
         }
@@ -419,15 +547,14 @@ impl Collab {
         if self.role != Role::Editor {
             return;
         }
-        let Ok(paths) = crate::io::read_dir(&self.dir) else { return };
+        let Ok(names) = self.store.list() else { return };
         let now = now_ms();
         let mut asked = false;
-        for path in &paths {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        for name in &names {
             if !name.starts_with(RECOVERY_PREFIX) || !name.ends_with(".json") {
                 continue;
             }
-            let Ok(Some(bytes)) = crate::io::read_file_optional(&path.to_string_lossy()) else { continue };
+            let Ok(Some(bytes)) = self.store.read(name) else { continue };
             if bytes.len() > 64 * 1024 {
                 continue;
             }
@@ -444,15 +571,20 @@ impl Collab {
     }
 
     fn apply_journals(&mut self, session: &mut Session) -> Result<()> {
-        let Ok(paths) = crate::io::read_dir(&self.dir) else { return Ok(()) };
+        let names = match self.store.list() {
+            Ok(names) => names,
+            Err(e) => {
+                self.error = Some(e.to_string());
+                return Ok(());
+            }
+        };
         let mut entries = Vec::new();
-        for path in paths {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        for name in names {
             if !name.starts_with(JOURNAL_PREFIX) || !name.ends_with(".jsonl") {
                 continue;
             }
-            let key = path.to_string_lossy().to_string();
-            let Ok(bytes) = crate::io::read_file(&key) else { continue };
+            let key = name.clone();
+            let Ok(Some(bytes)) = self.store.read(&name) else { continue };
             if bytes.len() > MAX_JOURNAL_BYTES {
                 self.error = Some(format!("{name} is larger than the 32 MiB collaboration limit"));
                 continue;
@@ -506,52 +638,48 @@ impl Collab {
     }
 
     fn write_recovery(&mut self) {
-        let path = self.dir.join(format!("{RECOVERY_PREFIX}{:016x}.json", self.peer));
+        let name = format!("{RECOVERY_PREFIX}{:016x}.json", self.peer);
         let r = Recovery { peer: self.peer, time: now_ms(), revision: self.revision };
         if let Ok(bytes) = serde_json::to_vec(&r)
-            && let Err(e) = crate::io::write_file(&path.to_string_lossy(), &bytes)
+            && let Err(e) = self.store.write(&name, &bytes)
         {
-            self.error = Some(e);
+            self.error = Some(e.to_string());
         }
     }
 
     fn clear_recovery(&mut self) {
-        let Ok(paths) = crate::io::read_dir(&self.dir) else { return };
-        for path in paths {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let Ok(names) = self.store.list() else { return };
+        for name in names {
             if name.starts_with(RECOVERY_PREFIX) && name.ends_with(".json") {
-                crate::io::remove_file(&path);
+                let _ = self.store.remove(&name);
             }
         }
     }
 
     fn remember_offsets(&mut self) {
         self.offsets.clear();
-        let Ok(paths) = crate::io::read_dir(&self.dir) else { return };
-        for path in paths {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let Ok(names) = self.store.list() else { return };
+        for name in names {
             if name.starts_with(JOURNAL_PREFIX)
                 && name.ends_with(".jsonl")
-                && let Some(len) = crate::io::file_len(&path.to_string_lossy())
+                && let Ok(Some(len)) = self.store.len(&name)
             {
-                self.offsets.insert(path.to_string_lossy().to_string(), len);
+                self.offsets.insert(name, len);
             }
         }
     }
 }
 
-fn read_snapshot(dir: &Path) -> Result<Option<Snapshot>> {
-    let path = dir.join(SNAPSHOT_FILE);
-    let Some(bytes) = crate::io::read_file_optional(&path.to_string_lossy()).map_err(EngineError::Other)? else {
+fn read_snapshot(store: &mut dyn Store) -> Result<Option<Snapshot>> {
+    let Some(bytes) = store.read(SNAPSHOT_FILE)? else {
         return Ok(None);
     };
     if bytes.len() > MAX_SNAPSHOT_BYTES {
-        return Err(EngineError::Other(format!("{} is larger than the 32 MiB collaboration limit", path.display())));
+        return Err(EngineError::Other("the collaboration snapshot is larger than the 32 MiB limit".into()));
     }
-    let snap: Snapshot =
-        serde_json::from_slice(&bytes).map_err(|e| EngineError::Other(format!("{} is not a collaboration snapshot: {e}", path.display())))?;
+    let snap: Snapshot = serde_json::from_slice(&bytes).map_err(|e| EngineError::Other(format!("the collaboration snapshot is damaged: {e}")))?;
     if snap.version > 1 {
-        return Err(EngineError::Other(format!("{} uses a newer collaboration format", path.display())));
+        return Err(EngineError::Other("the collaboration snapshot uses a newer format".into()));
     }
     Ok(Some(snap))
 }

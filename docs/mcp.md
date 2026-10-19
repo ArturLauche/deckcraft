@@ -101,8 +101,9 @@ rect, text}`, `shape.connect {from, to, preset}`, `shape.freeform {points, close
 `shape.merge {op, ids}`, `format.*`, `design.theme`, `transition.set`, `animation.set`,
 `chart.*`, `table.*`, `file.export {path, layout}` (PDF), `{path, width, secondsPerSlide, loop}`
 (GIF), or `{path, width: "1080p", fps: 30, useTimings: true}` (MP4; needs `ffmpeg` on the
-machine). Sharing uses `share.*` commands; `collab.start {folder, name, role}`, `collab.join`,
-`collab.status`, `collab.cursor` and `collab.leave` run a shared-folder live session (the engine
-ticks the journal before each command, so a headless session catches up without a window). Settings
+machine). Sharing uses `share.*` commands; `collab.start {folder, name, role}` (or `{relay, room, token,
+name, role}`), `collab.join`, `collab.status`, `collab.cursor` and `collab.leave` run a live
+session over a shared folder or a self-hosted relay (the engine ticks the journal before each
+command, so a headless session catches up without a window). Settings
 sync is configured in Preferences and keeps its credentials in an owner-only config file, never in
 a command result. `deckcraft-cli describe COMMAND` prints any command's parameters.

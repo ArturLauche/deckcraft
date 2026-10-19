@@ -1,6 +1,6 @@
 # PowerPoint feature checklist
 
-> **Generated:** 2026-10-19 (summary by `cargo xtask parity`; template customisation, encrypted settings sync and print margins/scaling/header-footer/direct `lp` re-scored; real-time co-authoring partial after the shared-folder journal; video, template gallery, settings sync and share links re-scored after the 2026-10-19 feature arc; earlier rows re-scored by the 2026-10-14 community PR wave and 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Generated:** 2026-10-19 (summary by `cargo xtask parity`; live collaboration adds a self-hosted relay; template customisation, encrypted settings sync and print margins/scaling/header-footer/direct `lp` re-scored; video, template gallery, settings sync and share links re-scored after the 2026-10-19 feature arc; earlier rows re-scored by the 2026-10-14 community PR wave and 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
 **Weighted breadth parity: 84%** over 195 features.
@@ -225,7 +225,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Review | Accessibility checker | P2 | D |
 | Review | Compare presentations | P2 | P |
 | Review | Share links with view/comment/edit permissions, expiry and revocation | P1 | D |
-| Review | Real-time co-authoring (presence, cursors, merge, collaborative undo) | P1 | P |
+| Review | Real-time co-authoring (presence, cursors, folder or self-hosted relay journal, collaborative undo) | P1 | P |
 | Review | Track changes / version history | P2 | M |
 | Draw | Ink pens, highlighter, eraser | P1 | P |
 | Draw | Ink to shape / text | P2 | P |

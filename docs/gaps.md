@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (template customisation and optional encryption for settings sync land; shared-folder live collaboration still needs a relay and CRDT merge; previous: print margins, video export, format registry, share links) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (a self-hosted TCP relay joins the shared-folder live session; template customisation and encrypted settings sync land; CRDT merge and relay TLS remain; previous: print margins, video export, format registry, share links) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -159,21 +159,23 @@ Detail in [file-format-parity.md](file-format-parity.md).
 
 ## Features
 
-### Live collaboration: a relay and CRDT merge
-- **Evidence:** File ▸ Share now starts or joins a shared-folder session (`collab.start`,
-  `collab.join`, `collab.leave`, `collab.status`, `collab.cursor`). Peers append ordered commands
-  to `journal-<peer>.jsonl`, publish presence and cursors in `peer-<peer>.json`, enforce editor /
-  commenter / viewer roles before local and remote commands, and converge after undo/redo or a
-  failed command through `snapshot.json` and recovery requests. Reconnect is reading the snapshot
-  and the journals after a restart. It works offline on a shared drive or Syncthing folder.
-- **Remaining:** there is no socket relay, so teams that cannot share a folder cannot co-edit.
-  Commands are ordered by `(timestamp, peer, sequence)`, not merged by a CRDT: two edits to the
-  same text at the same instant are last-writer-wins, not interleaved. The folder's filesystem
-  permissions are the security boundary; there is no room token or end-to-end encryption.
-- **Impact:** teams that expect Google-Docs-style co-authoring can collaborate on a shared folder,
-  but not across the internet without one, and simultaneous typing is not character-perfect.
-- **Estimate:** 15–25 h (a small relay crate with authentication and rooms, a CRDT or per-shape
-  merge for text, and reconnect/merge tests).
+### Live collaboration: CRDT merge and transport security
+- **Evidence:** File ▸ Share starts or joins a live session (`collab.start`, `collab.join`,
+  `collab.leave`, `collab.status`, `collab.cursor`) on a shared folder or a self-hosted relay
+  (`deckcraft-cli relay`). Peers append ordered commands to `journal-<peer>.jsonl`, publish
+  presence and cursors, enforce editor / commenter / viewer roles before local and remote
+  commands, and converge after undo/redo or a failed command through snapshots and recovery
+  requests. Reconnect reads the snapshot and journals after a restart. The relay stores the same
+  room files, authenticates every request with a room token, confines names to the room and
+  survives a restart.
+- **Remaining:** commands are ordered by `(timestamp, peer, sequence)`, not merged by a CRDT: two
+  edits to the same text at the same instant are last-writer-wins, not interleaved. The relay
+  speaks plain TCP, so a public deployment needs TLS at a reverse proxy; the token is a shared
+  room secret, not per-user identity, and there is no end-to-end encryption.
+- **Impact:** teams can now co-edit across the internet without a shared folder, but simultaneous
+  typing is not character-perfect and a relay operator can read the room.
+- **Estimate:** 10–18 h (a CRDT or per-shape text merge, per-user relay identities, TLS and
+  reconnect/merge tests).
 
 ### Font weights beyond Regular, Bold and Italic (#69)
 - **Evidence:** #69; the font database maps a family to four faces.
@@ -378,7 +380,11 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-19 | minor | Shared-folder live collaboration lands: ordered journals, roles, presence, cursors, snapshot undo and recovery. A socket relay and CRDT merge remain |
+| 2026-10-19 | minor | Live collaboration gains a self-hosted TCP relay with room tokens, persistence and reconnect; CRDT merge and transport TLS remain |
+| 2026-10-19 | minor | Settings sync can encrypt its remote snapshot with AES-256-GCM/Argon2id; enabling it re-uploads a plain remote |
+| 2026-10-19 | minor | Starter and user templates take a theme override, generated dark variant and heading/body fonts in File › New and `file.new` |
+| 2026-10-19 | minor | Print margins, scaling, custom header/footer, page numbers, fit-to-paper and direct `lp` printing; native OS print sheet remains open |
+| 2026-10-19 | minor | Shared-folder live collaboration lands: ordered journals, roles, presence, cursors, snapshot undo and recovery. A socket relay has since landed; CRDT merge remains |
 | 2026-10-19 | major | Video export and the format registry close the old video gap; printing narrows to native print and margins; share links and settings sync land; real-time co-editing added as the collaboration gap |
 | 2026-10-15 | trivial | PPTX trigger sequences keep later On Click steps instead of converting them to After Previous; mixed starts, independent buttons and paragraph builds have synthetic round-trip regressions |
 | 2026-10-16 | trivial | AutoFormat superscripts ordinals (1st, 22nd) as you type, with an AutoCorrect option to turn it off; automatic bulleted lists remain |
@@ -446,6 +452,3 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-11 | minor | Animated GIF export landed (#171); the entry now covers video export and animating transitions in the GIF |
 | 2026-10-10 | minor | Noted that no gap blocks alpha (core-workflow gate passes) |
 | 2026-10-10 | major | Created: every gap from the 2026-10-10 re-measure and the 16 open GitHub issues, ranked, with beta blockers marked |
-| 2026-10-19 | minor | Print margins, scaling, custom header/footer, page numbers, fit-to-paper and direct `lp` printing; native OS print sheet remains open |
-| 2026-10-19 | minor | Starter and user templates take a theme override, generated dark variant and heading/body fonts in File › New and `file.new` |
-| 2026-10-19 | minor | Settings sync can encrypt its remote snapshot with AES-256-GCM/Argon2id; enabling it re-uploads a plain remote |
