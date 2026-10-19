@@ -13,7 +13,9 @@
 //! Limits are hostile-input limits: frame size, rate, count, slide duration and audio length are
 //! bounded, and every number from the command is checked before a frame is allocated.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::Ordering;
 
 use deckcraft_anim::Timeline;
 use deckcraft_model::{Presentation, ShapeKind};
@@ -411,7 +413,6 @@ pub fn encode_to(
             text
         })
     });
-    let mut rendered = 0u64;
     let mut write_err: Option<String> = None;
     let total = plan.frames.max(1);
     for f in 0..total {
@@ -429,8 +430,7 @@ pub fn encode_to(
             write_err = Some(e.to_string());
             break;
         }
-        rendered += 1;
-        progress(Progress { frame: rendered, frames: total, stage: "rendering" });
+        progress(Progress { frame: f + 1, frames: total, stage: "rendering" });
     }
     drop(stdin);
     let status = child.wait();

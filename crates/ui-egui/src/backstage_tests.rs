@@ -85,12 +85,12 @@ fn page_ids_round_trip_and_unknown_ids_are_refused() {
         assert_eq!(Page::parse(p.id()), Some(p));
     }
     assert_eq!(Page::parse(" SAVEAS "), Some(Page::SaveAs));
-    assert_eq!(Page::parse("share"), None);
+    assert_eq!(Page::parse("share"), Some(Page::Share));
     assert_eq!(Page::parse(""), None);
     let (top, bottom) = entries(false);
     assert_eq!(top, vec![Nav::Page(Page::Home), Nav::Page(Page::New), Nav::Page(Page::Open)], "the start screen has no presentation pages");
     assert_eq!(bottom, vec![Nav::Page(Page::Account), Nav::Options]);
-    assert_eq!(entries(true).0.len(), 9);
+    assert_eq!(entries(true).0.len(), 10);
     assert_eq!(split_path("/home/me/Talk.pptx"), ("Talk.pptx".into(), "/home/me".into()));
     assert_eq!(format_bytes(512), "512 bytes");
     assert_eq!(format_bytes(33_485), "32.7 KB");
@@ -158,11 +158,12 @@ fn alt_f_arrows_enter_and_esc_drive_the_side_menu() {
 fn every_page_renders() {
     let mut h = harness(new_app());
     let last_theme = deckcraft_model::theme::builtin_themes().last().map(|t| t.name.clone()).unwrap();
-    let checks: [(Page, &str); 8] = [
+    let checks: [(Page, &str); 9] = [
         (Page::Home, "Recent"),
         (Page::New, &last_theme),
         (Page::Open, "Browse"),
         (Page::Info, "Hidden slides"),
+        (Page::Share, "save the presentation before sharing it"),
         (Page::SaveAs, "Not saved yet"),
         (Page::Print, "Print Hidden Slides"),
         (Page::Export, "Create PDF Document"),
@@ -176,7 +177,9 @@ fn every_page_renders() {
         let selected = h.query_all_by_label(p.label()).any(|n| in_nav(n.rect()));
         assert!(selected, "{} is in the side menu", p.label());
     }
-    assert!(h.state_mut().run("app.backstage", json!({"page": "share"})).is_err(), "Share (cloud) isn't offered");
+    h.state_mut().run("app.backstage", json!({"page": "share"})).unwrap();
+    h.run_steps(3);
+    assert_eq!(page(&h), Some(Page::Share));
 }
 
 /// A starter template from File › New opens its deck and leaves the File tab.

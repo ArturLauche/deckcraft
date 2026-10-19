@@ -86,6 +86,7 @@ fn slide_size(p: &Value) -> deckcraft_geom::Size {
 }
 
 fn templates(s: &mut Session, _p: &Value) -> Result<Value> {
+    #[allow(unused_mut)]
     let mut list: Vec<Value> = crate::templates::starters()
         .iter()
         .map(|t| {
@@ -142,6 +143,8 @@ fn formats(_s: &mut Session, _p: &Value) -> Result<Value> {
 /// A template saved by the user (desktop), or an error naming the built-ins when there is no
 /// such template.
 fn user_template(s: &Session, name: &str) -> Result<Presentation> {
+    #[cfg(target_arch = "wasm32")]
+    let _ = s;
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(dir) = &s.template_dir
         && let Some(doc) = crate::templates::load_user(dir, name)
@@ -290,7 +293,7 @@ pub fn read_presentation_file(path: &str) -> Result<LoadedFile> {
 /// Add a loaded presentation as the active document: the shared end of `file.open` and
 /// `file.adopt`. A damaged file opens as an untitled repaired copy, so Save can't overwrite the
 /// original with the empty media.
-fn adopt_loaded(s: &mut Session, f: LoadedFile) -> Result<Value> {
+pub(crate) fn adopt_loaded(s: &mut Session, f: LoadedFile) -> Result<Value> {
     let LoadedFile { path, doc, native, damaged } = f;
     let keep_path = native && damaged.is_empty();
     let i = add_opened(s, &path, keep_path.then(|| path.clone()), doc);
@@ -551,7 +554,14 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad("file.saveAs", format!("`{format}` isn't an editable format; use file.export for a copy")));
     }
-    save(s, p)
+    let before = s.active().and_then(|d| d.path.clone());
+    let result = save(s, p)?;
+    let after = result.get("path").and_then(Value::as_str).map(str::to_string);
+    if after != before {
+        // Saving a copy (from a view-only share link) makes the copy the user's own to edit.
+        s.set_access(crate::sharing::Access::Full)?;
+    }
+    Ok(result)
 }
 
 fn save_bytes_cmd(s: &mut Session, p: &Value) -> Result<Value> {

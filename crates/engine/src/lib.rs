@@ -24,8 +24,10 @@ pub mod links;
 pub mod media_refs;
 pub mod recovery;
 pub mod sample;
+pub mod sharing;
 pub mod sounds;
 pub mod spell;
+pub mod sync;
 pub mod templates;
 pub mod thesaurus;
 pub mod tools;
@@ -224,6 +226,8 @@ pub struct DocState {
     pub composition: Option<Composition>,
     /// Review › Compare in progress: the revised copy.
     pub compare: Option<compare::Compare>,
+    /// What a share link opened this presentation for; the ordinary editor is [`sharing::Access::Full`].
+    pub access: sharing::Access,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -233,6 +237,42 @@ static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 /// [`recovery::instance_id`]) plus a counter.
 fn next_uid() -> u64 {
     recovery::instance_id().wrapping_add(NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) & recovery::UID_MASK
+}
+
+/// Whether a share with `access` may run `id`. A restricted session can still navigate, present,
+/// export, print and read; a commenter may also add, reply to, resolve and delete comments.
+fn command_allowed(access: sharing::Access, id: &str, spec: &cmd::CommandSpec, params: &Value, current_path: Option<&str>) -> bool {
+    if access == sharing::Access::Full {
+        return true;
+    }
+    // Saving a copy elsewhere is how a viewer or commenter starts editing their own version;
+    // saving over the shared file is not. `file.saveAs` sets the copy back to full access.
+    if id == "file.saveAs" {
+        let target = params.get("path").and_then(Value::as_str).map(|path| {
+            let format =
+                params.get("format").and_then(Value::as_str).or_else(|| crate::cmd::file::writable_format_for_path(path)).unwrap_or("deckcraft");
+            crate::cmd::file::path_with_format(path, format)
+        });
+        return target.is_some_and(|path| current_path.is_none_or(|current| !crate::io::paths_equal(&path, current)));
+    }
+    // Share links are capability tokens: a viewer must not list other people's tokens (which
+    // would let them open an editor link) or mint, revoke or invite. Opening a link and parsing
+    // one they already have stay available.
+    if id.starts_with("share.") {
+        return matches!(id, "share.open" | "share.parseLink");
+    }
+    // Reloading from disk would throw away a commenter's unsaved comments, and it is not an edit
+    // they can undo. Everything else that writes the document or its saved copy is below.
+    if id == "file.revert" {
+        return false;
+    }
+    // Most edits are undoable; these change the document or its saved copy without an undo step.
+    let mutating =
+        spec.undoable || matches!(id, "edit.undo" | "edit.redo" | "edit.repeat" | "file.save" | "file.saveTemplate" | "text.compose" | "text.commit");
+    if !mutating {
+        return true;
+    }
+    access.allows_comment() && id.starts_with("comment.")
 }
 
 impl DocState {
@@ -251,6 +291,7 @@ impl DocState {
             missing_fonts: Vec::new(),
             composition: None,
             compare: None,
+            access: sharing::Access::Full,
         }
     }
     pub fn is_dirty(&self) -> bool {
@@ -567,6 +608,12 @@ impl Session {
         self.active = Some(self.docs.len() - 1);
         self.docs.len() - 1
     }
+
+    /// Set the active presentation's access (a share link opened it for less than full editing).
+    pub fn set_access(&mut self, access: sharing::Access) -> Result<()> {
+        self.doc_mut()?.access = access;
+        Ok(())
+    }
     pub fn close_document(&mut self, i: usize) {
         if i < self.docs.len() {
             let d = self.docs.remove(i);
@@ -589,6 +636,16 @@ impl Session {
 
     fn execute_unguarded(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.into()))?;
+        // A share link opens the presentation with less than full access. Navigation, the show,
+        // export and queries stay available; edits are refused here, not merely hidden in the UI.
+        let access = self.active().map(|d| d.access).unwrap_or(sharing::Access::Full);
+        let current_path = self.active().and_then(|d| d.path.clone());
+        if access != sharing::Access::Full && !command_allowed(access, id, spec, params, current_path.as_deref()) {
+            return Err(EngineError::Disabled(
+                id.into(),
+                format!("this presentation is shared for {}; save a copy to edit it", access.label().to_lowercase()),
+            ));
+        }
         // Any other edit (or a click, a key, undo) settles an input method's composition first.
         if self.depth == 0 && (spec.journal || spec.undoable) && !matches!(id, "text.compose" | "text.commit") {
             self.end_composition();

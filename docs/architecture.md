@@ -1,10 +1,10 @@
 # DeckCraft architecture
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (community PR wave 2026-10-14: 320 engine commands, 41 dialogs, the `metafile` crate, 1,641 tests; duplicated L2/L5/L6 rows and headers folded; previous: minor, transition frames) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (video export, the format registry, share links and access enforcement, settings sync; previous: community PR wave 2026-10-14) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft is built today. The binding rules (layering, everything is a command, thin UI, never
 break wasm, never crash) are in [AGENTS.md](../AGENTS.md) §3–§5; this document describes what
-exists. 202k lines of Rust in 24 crates, 3 apps and `xtask`; 1,641 `#[test]` functions
+exists. 212k lines of Rust in 24 crates, 3 apps and `xtask`; 1,786 `#[test]` functions
 (`cargo xtask stats` counts them per crate).
 
 ## Layers
@@ -20,7 +20,7 @@ nothing below L6 uses egui, eframe, winit or rfd.
 | L2 | `text`, `anim`, `format`, `media` | Shaping (HarfRust), UAX #9 bidi, UAX #14 line breaking, autofit, caret hit testing; per-shape animation state over time, the show state machine, transition frame layouts, Morph matching; `.deckcraft` (zip + JSON + media) and outline text; media probing, decoding, mixer and clock |
 | L3 | `render`, `pptx` | `vello_cpu` raster of slides, masters and layouts (fills, outlines, effects, pictures, tables, charts, Morph frames); PPTX import/export from ECMA-376 |
 | L4 | `pdf` | App-owned export layout and rendering through the shared `craft-pdf` writer |
-| L5 | `engine` | Sessions, documents, selection, undo history on shared slide snapshots, the command registry (320 commands in `cmd/*`), pointer tools, keys, AutoRecover, the panic guard (`guard.rs`) |
+| L5 | `engine` | Sessions, documents, selection, undo history on shared slide snapshots, the command registry (`cmd/*`), pointer tools, keys, AutoRecover, the panic guard (`guard.rs`), the format registry (`formats.rs`), video timelines (`video_export.rs`), share links and access (`sharing.rs`, `cmd/share.rs`) and settings sync (`sync.rs`) |
 | L6 | `ui-egui`, `mcp` | The PowerPoint-style interface (ribbon with 10 tabs + contextual tabs, canvas, thumbnails, panes, 41 dialogs, show and presenter windows, the JSON control channel); the MCP server (JSON-RPC 2.0 over stdio), headless or connected to a running app |
 | apps | `deckcraft` (desktop: eframe/wgpu, cpal audio, logging), `deckcraft-cli` (run, render, convert, mcp, app), `deckcraft-web` (trunk; WebGPU with WebGL2 fallback), `xtask` | Exempt from layering |
 
@@ -46,6 +46,36 @@ channel (`deckcraft --control PORT`, [control-protocol.md](control-protocol.md))
 Programmatic calls never open dialogs. Pointer gestures go through `Session::pointer`, keys through
 `Session::key`.
 
+## Sharing, access and settings sync
+
+A share is a capability token in a sidecar beside the deck (`talk.deckcraft` → `talk.share.json`),
+never inside the presentation. Each link carries a permission (`view`, `comment`, `edit`), an
+optional expiry and a revocation flag; `share.open` loads the deck and sets the session's `Access`.
+`Session::execute` rejects mutating commands for restricted sessions, and `Session::pointer`
+rejects every press, drag and double-click, because pointer gestures edit the document directly.
+Commenters may run `comment.*`; viewers may navigate, show, print and export. `file.saveAs` to a
+different path is allowed and makes the copy a full-access document, so "save a copy to edit" works
+without letting a viewer overwrite the shared file.
+
+Settings sync is opt-in and local-first. `sync::Snapshot` holds only the categories the user
+selected, with a `modified` time per category. A merge is last-writer-wins by category, ties broken
+by device id, and refuses a remote whose revision is older than the last one seen. Transports are a
+local folder, S3-compatible storage (signed through `curl --aws-sigv4`) and Google Drive (OAuth
+refresh token through `curl`); the engine owns the merge and the UI worker owns the thread and the
+progress state. Credentials live in an owner-only config file (`0600` on Unix) and never in a
+snapshot.
+
+## Video export
+
+`video_export::plan` turns a deck and its options into a timeline of frames: slide durations from
+`secondsPerSlide` or rehearsed `advance_after_ms`, transitions from `anim::transition_frame`, and
+build animations from `anim::Timeline`. The same `render::render_slide` output feeds each frame, so
+the video matches the editor. Frames are converted to opaque RGBA and piped to `ffmpeg`; MP4 uses
+H.264/AAC, WebM uses VP9/Opus. Autoplay media audio is mixed from the media decoder. The UI runs the
+job on a worker thread with progress and Cancel and encodes a snapshot of the deck, so editing
+while it runs cannot change the output. There is no bundled encoder: a missing `ffmpeg` is a clear
+error.
+
 ## Rendering and the show
 
 The renderer draws a slide to an RGBA pixmap on the CPU; the UI uploads it as an egui texture.
@@ -66,6 +96,14 @@ overlays an invisible real-text layer with embedded font subsets.
   repair. Unknown elements round-trip through `Opaque` and `raw_ext` fields.
 - **Native** (`crates/format`): zip with `mimetype`, `presentation.json` and `media/<id>`; readers
   ignore unknown fields; `.slidecraft` files from before the rename still open.
+- **Format registry** (`crates/engine/src/formats.rs`): the one list behind Save As, Export, the
+  CLI and MCP. It separates editable formats (`.deckcraft`, `.pptx`, `.potx`, `.ppsx`) from copies
+  (PDF, PNG, JPEG, WebP, GIF, MP4, WebM, TXT, MD), names each one's losses and options, and marks
+  desktop-only writers. Save As rejects a copy format; Export writes one. Paths are normalized to
+  the chosen format's extension and every write goes through `crate::io`, which enforces the
+  automation roots and writes through a temporary sibling.
+- **Video** (`crates/engine/src/video_export.rs`): a timeline of rendered frames piped to the
+  system `ffmpeg`; the UI worker is `crates/ui-egui/src/videojob.rs`.
 - Formats and their gaps: [file-format-parity.md](file-format-parity.md).
 
 ## Quality gates
@@ -79,6 +117,7 @@ macOS, Windows, Linux, FreeBSD and web artifacts.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Format registry, video export worker, share links with engine-level access enforcement, and opt-in settings sync (folder/S3/Drive). 328 commands, 212k lines, 1,786 tests |
 | 2026-10-14 | minor | Community PR wave folded: one L2/L5/L6 row each; command registry 320 (`cmd!` registrations in `cmd/*`), 41 dialogs (titled in `dialogs.rs`), 202k lines, 24 crates (`metafile` added at L0), 1,641 tests. The per-PR rows below give the counts each PR saw on its own branch |
 | 2026-10-14 | minor | Size and Position dialog (`shape.sizePosition`): position, size, rotation, scale and lock aspect in one undo step. 227 commands, 28 dialogs |
 | 2026-10-14 | trivial | Command registry: 228 (`comment.next`, `comment.prev`) |

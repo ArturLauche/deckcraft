@@ -33,6 +33,7 @@ pub enum Page {
     New,
     Open,
     Info,
+    Share,
     SaveAs,
     Print,
     Export,
@@ -40,7 +41,7 @@ pub enum Page {
 }
 
 impl Page {
-    pub const ALL: [Page; 8] = [Page::Home, Page::New, Page::Open, Page::Info, Page::SaveAs, Page::Print, Page::Export, Page::Account];
+    pub const ALL: [Page; 9] = [Page::Home, Page::New, Page::Open, Page::Info, Page::Share, Page::SaveAs, Page::Print, Page::Export, Page::Account];
 
     /// The id `app.backstage {page}` takes.
     pub fn id(self) -> &'static str {
@@ -49,6 +50,7 @@ impl Page {
             Page::New => "new",
             Page::Open => "open",
             Page::Info => "info",
+            Page::Share => "share",
             Page::SaveAs => "saveAs",
             Page::Print => "print",
             Page::Export => "export",
@@ -68,6 +70,7 @@ impl Page {
             Page::New => "New",
             Page::Open => "Open",
             Page::Info => "Info",
+            Page::Share => "Share",
             Page::SaveAs => "Save As",
             Page::Print => "Print",
             Page::Export => "Export",
@@ -81,6 +84,7 @@ impl Page {
             Page::New => Icon::NewFile,
             Page::Open => Icon::OpenFolder,
             Page::Info => Icon::Info,
+            Page::Share => Icon::Share,
             Page::SaveAs => Icon::SaveAs,
             Page::Print => Icon::Print,
             Page::Export => Icon::Export,
@@ -127,7 +131,15 @@ impl Nav {
 pub fn entries(has_doc: bool) -> (Vec<Nav>, Vec<Nav>) {
     let mut top = vec![Nav::Page(Page::Home), Nav::Page(Page::New), Nav::Page(Page::Open)];
     if has_doc {
-        top.extend([Nav::Page(Page::Info), Nav::Save, Nav::Page(Page::SaveAs), Nav::Page(Page::Print), Nav::Page(Page::Export), Nav::Close]);
+        top.extend([
+            Nav::Page(Page::Info),
+            Nav::Save,
+            Nav::Page(Page::Share),
+            Nav::Page(Page::SaveAs),
+            Nav::Page(Page::Print),
+            Nav::Page(Page::Export),
+            Nav::Close,
+        ]);
     }
     (top, vec![Nav::Page(Page::Account), Nav::Options])
 }
@@ -217,6 +229,8 @@ pub struct Backstage {
     pub video_audio: bool,
     pub video_quality: u8,
     pub video_hidden: bool,
+    /// File › Share: fields and the last share.info result.
+    pub share: crate::sharingui::State,
 }
 
 impl Backstage {
@@ -262,6 +276,7 @@ impl Backstage {
             video_audio: true,
             video_quality: 60,
             video_hidden: false,
+            share: crate::sharingui::State::default(),
         }
     }
 
@@ -474,6 +489,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                     Page::New => new_page(app, ui, &mut bs),
                     Page::Open => open_page(app, ui, &mut bs),
                     Page::Info => info(app, ui, &mut bs),
+                    Page::Share => crate::sharingui::page(app, ui, &mut bs.share),
                     Page::SaveAs => save_as(app, ui, &mut bs, &mut out),
                     Page::Print => print(app, ui, &mut bs),
                     Page::Export => export(app, ui, &mut bs),
@@ -721,7 +737,7 @@ fn user_template_tiles(app: &mut SlideApp, ui: &mut Ui, bs: &Backstage, query: &
         .filter(|t| {
             (category.eq_ignore_ascii_case("all") || category.eq_ignore_ascii_case("yours") || category.eq_ignore_ascii_case("favourites"))
                 && (q.is_empty() || t.name.to_lowercase().contains(&q) || t.theme.to_lowercase().contains(&q))
-                && (!category.eq_ignore_ascii_case("favourites") || favourites.iter().any(|f| *f == t.name))
+                && (!category.eq_ignore_ascii_case("favourites") || favourites.contains(&t.name))
         })
         .collect();
     if list.is_empty() {
@@ -988,7 +1004,7 @@ fn new_page(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     ui.add_space(14.0);
     heading(ui, "Templates");
     let templates = template_tiles(app, ui, &q, usize::MAX, &bs.template_category);
-    let user = user_template_tiles(app, ui, &bs, &q);
+    let user = user_template_tiles(app, ui, bs, &q);
     if !templates && !user {
         if bs.template_category.eq_ignore_ascii_case("favourites") && favourites == 0 {
             dim(ui, "No favourites yet: press the star on a template to keep it here.");

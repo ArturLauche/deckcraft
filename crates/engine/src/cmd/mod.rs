@@ -23,6 +23,7 @@ pub mod review;
 mod richclip;
 pub mod selection;
 pub mod shape;
+pub mod share;
 pub mod slide;
 pub mod smartart;
 pub mod table;
@@ -185,6 +186,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(table::specs());
         v.extend(find::specs());
         v.extend(review::specs());
+        v.extend(share::specs());
         v.extend(inspect::specs());
         v.extend(media::specs());
         v.extend(artistic::specs());

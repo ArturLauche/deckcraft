@@ -62,7 +62,8 @@ DeckCraft is in alpha, heading for beta (see the [roadmap](ROADMAP.md)).
 Today it can:
 
 - **Make decks**: slide masters and eleven layouts with placeholders that inherit position and
-  formatting, eight original themes with colour and font schemes, sections, notes, comments,
+  formatting, twelve original themes with colour and font schemes, 17 original starter decks in
+  10 categories (with search, favourites and your own saved templates), sections, notes, comments,
   headers and footers, custom slide sizes.
 - **Draw**: 150+ preset shapes with adjust handles, connectors that stay glued to shapes, freeform,
   curve and scribble tools, merge shapes (union, combine, fragment, intersect, subtract), gradient,
@@ -74,9 +75,13 @@ Today it can:
   audio and video (MP3, AAC, FLAC, ALAC, Ogg, Opus, WAV, AIFF; H.264, HEVC, VP9, AV1).
 - **Present**: transitions (including Morph), entrance/emphasis/exit and motion-path animations,
   by-paragraph builds, full-screen slide show, presenter view, pen, rehearse timings, media playback.
-- **Exchange files**: open and save .pptx presentations, export PDF (slides, notes pages, handouts
-  with selectable text), PNG/JPEG, an animated GIF of the deck and outlines. Unsaved work is kept by AutoRecover.
-- **Automate**: 200+ commands with undo, all scriptable from the CLI, a JSON control channel and an
+- **Exchange files**: open and save .pptx presentations (and .potx/.ppsx templates and shows),
+  export PDF (slides, notes pages, handouts with selectable text, colour or grayscale), PNG/JPEG/WebP,
+  an animated GIF, MP4/WebM video with transitions and builds, and text or Markdown outlines.
+  Unsaved work is kept by AutoRecover.
+- **Share and sync**: File ▸ Share links with view, comment or edit access, expiry and revocation;
+  opt-in settings sync through a local folder, S3-compatible storage or Google Drive.
+- **Automate**: 300+ commands with undo, all scriptable from the CLI, a JSON control channel and an
   MCP server for AI agents.
 
 <table>

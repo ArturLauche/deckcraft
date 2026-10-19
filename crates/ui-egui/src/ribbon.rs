@@ -160,7 +160,9 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     if !TABS.contains(&app.ui.tab.as_str()) && !ctx_tabs.contains(&app.ui.tab.as_str()) {
         app.ui.tab = "Home".into();
     }
-    let h = 28.0 + if app.ui.ribbon_collapsed { 4.0 } else { RIBBON_H + 20.0 };
+    // The extra height holds the horizontal scrollbar: with a wide font catalogue the Home
+    // groups are wider than a small window, and every command must stay reachable.
+    let h = 28.0 + if app.ui.ribbon_collapsed { 4.0 } else { RIBBON_H + 30.0 };
     egui::Panel::top("ribbon").exact_size(h).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
         let rect = ui.max_rect();
         // Tabs. File comes first and opens the File tab's full-window view (Backstage), as in
@@ -215,38 +217,40 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             return;
         }
         // The white card.
-        let card = Rect::from_min_max(pos2(rect.min.x + 8.0, rect.min.y + 30.0), pos2(rect.max.x - 8.0, rect.min.y + 30.0 + RIBBON_H + 10.0));
+        let card = Rect::from_min_max(pos2(rect.min.x + 8.0, rect.min.y + 30.0), pos2(rect.max.x - 8.0, rect.min.y + 30.0 + RIBBON_H + 20.0));
         ui.painter().rect_filled(card.translate(vec2(0.0, 1.0)), CornerRadius::same(10), t.card_border);
         ui.painter().rect_filled(card, CornerRadius::same(10), t.card);
-        let inner = Rect::from_min_size(pos2(card.min.x + 10.0, card.min.y + 5.0), vec2(card.width() - 20.0, RIBBON_H));
+        let inner = Rect::from_min_size(pos2(card.min.x + 10.0, card.min.y + 5.0), vec2(card.width() - 20.0, RIBBON_H + 8.0));
         let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Min)));
         cui.set_clip_rect(inner.expand2(vec2(0.0, 3.0)));
         cui.spacing_mut().item_spacing.x = 1.0;
-        let ui = &mut cui;
         let tab = app.ui.tab.clone();
-        match tab.as_str() {
-            "Home" => home(app, ui),
-            "Insert" => insert(app, ui),
-            "Draw" => draw(app, ui),
-            "Design" => design(app, ui),
-            "Transitions" => transitions(app, ui),
-            "Animations" => animations(app, ui),
-            "Slide Show" => slide_show(app, ui),
-            "Record" => record(app, ui),
-            "Review" => review(app, ui),
-            "View" => view(app, ui),
-            "Shape Format" => shape_format(app, ui),
-            "Picture Format" => picture_format(app, ui),
-            "Table Design" => table_design(app, ui),
-            "Layout" => table_layout(app, ui),
-            "Chart Design" => chart_design(app, ui),
-            "SmartArt Design" => smartart_design(app, ui),
-            "Playback" => playback(app, ui),
-            "Slide Master" => slide_master(app, ui),
-            "Handout Master" => handout_master(app, ui),
-            "Notes Master" => notes_master(app, ui),
-            _ => {}
-        }
+        egui::ScrollArea::horizontal()
+            .id_salt(("ribbon_scroll", tab.clone()))
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+            .show(&mut cui, |ui| match tab.as_str() {
+                "Home" => home(app, ui),
+                "Insert" => insert(app, ui),
+                "Draw" => draw(app, ui),
+                "Design" => design(app, ui),
+                "Transitions" => transitions(app, ui),
+                "Animations" => animations(app, ui),
+                "Slide Show" => slide_show(app, ui),
+                "Record" => record(app, ui),
+                "Review" => review(app, ui),
+                "View" => view(app, ui),
+                "Shape Format" => shape_format(app, ui),
+                "Picture Format" => picture_format(app, ui),
+                "Table Design" => table_design(app, ui),
+                "Layout" => table_layout(app, ui),
+                "Chart Design" => chart_design(app, ui),
+                "SmartArt Design" => smartart_design(app, ui),
+                "Playback" => playback(app, ui),
+                "Slide Master" => slide_master(app, ui),
+                "Handout Master" => handout_master(app, ui),
+                "Notes Master" => notes_master(app, ui),
+                _ => {}
+            });
     });
 }
 

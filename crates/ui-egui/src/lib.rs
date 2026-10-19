@@ -26,10 +26,12 @@ pub mod qat;
 pub mod ribbon;
 pub mod selpane;
 pub mod settings;
+pub mod sharingui;
 pub mod show;
 pub mod sorter;
 pub mod squiggles;
 pub mod status;
+pub mod syncui;
 pub mod textures;
 pub mod theme;
 pub mod thumbs;
@@ -461,6 +463,10 @@ pub struct SlideApp {
     pub status: Option<(String, f64)>,
     /// A video export running in the background (progress and Cancel in a window).
     pub video_job: Option<videojob::Job>,
+    /// Optional settings sync (Preferences ▸ Settings sync).
+    pub sync: syncui::SyncUi,
+    /// The per-user settings folder; `None` in the browser. Sync and user templates live here.
+    pub settings_dir: Option<std::path::PathBuf>,
     /// A presentation being read in the background, with its progress window ([`opening`]).
     pub opening: Option<opening::Opening>,
     /// A brief notice over the bottom of the window (missing fonts on opening a file).
@@ -557,6 +563,8 @@ impl SlideApp {
             media: media::MediaHost::new(audio_out),
             status: None,
             video_job: None,
+            sync: syncui::SyncUi::default(),
+            settings_dir: None,
             opening: None,
             toast: None,
             fonts_noted: Default::default(),
@@ -834,6 +842,54 @@ impl SlideApp {
         self.video_job = Some(videojob::Job::start(doc, opts, path.clone(), now_ms()));
         self.set_status(format!("Creating {path}…"));
         true
+    }
+
+    /// Sync settings now, in the background. The config is saved first, so a sync that changes
+    /// nothing still remembers the provider and categories.
+    pub fn sync_now(&mut self) {
+        self.sync.ensure_loaded(self.settings_dir.as_deref());
+        let Some(dir) = self.settings_dir.clone() else {
+            self.sync.status = "Settings sync needs the desktop app.".into();
+            return;
+        };
+        if !self.sync.config.enabled {
+            self.sync.status = "Turn on settings sync first.".into();
+            return;
+        }
+        self.sync.persist();
+        let local = self.sync.local_snapshot(self);
+        self.sync.start(dir, local, self.last_time);
+    }
+
+    /// Poll the sync worker and start an automatic sync when it is due. Called once a frame from
+    /// [`SlideApp::logic`]; a finished merge is applied on this (the UI) thread.
+    pub fn sync_tick(&mut self, now: f64) {
+        self.sync.ensure_loaded(self.settings_dir.as_deref());
+        if let Some(state) = self.sync.take_finished() {
+            match state {
+                syncui::State::Done(outcome) => {
+                    let outcome = *outcome;
+                    let changed = syncui::apply(&mut self.ui, &mut self.session.prefs, &outcome.report.snapshot, &outcome.report.applied);
+                    self.sync.state = outcome.state;
+                    self.sync.conflicts = outcome.report.conflicts.clone();
+                    self.sync.status = outcome.report.summary();
+                    if changed {
+                        self.restyle = true;
+                    }
+                }
+                syncui::State::Failed(error) => self.sync.status = format!("Settings sync failed: {error}"),
+                syncui::State::Running => {}
+            }
+        }
+        if !self.sync.config.enabled || !self.sync.config.auto || self.sync.job.is_some() {
+            return;
+        }
+        let Some(dir) = self.settings_dir.clone() else { return };
+        let interval = f64::from(self.sync.config.interval_minutes.max(1)) * 60.0;
+        if self.sync.last_attempt == 0.0 || now - self.sync.last_attempt >= interval {
+            let local = self.sync.local_snapshot(self);
+            self.sync.start(dir, local, now);
+        }
     }
 
     /// Hands `bytes` to the browser as a download (web); false (with the reason in the status
@@ -1623,6 +1679,7 @@ impl SlideApp {
         self.last_time = now;
         self.drain_control(ctx);
         self.poll_opening();
+        self.sync_tick(now);
         if self.fonts_ready {
             self.drain_inbox();
         }
@@ -3481,5 +3538,29 @@ mod tests {
         let after = harness.state().ui.ui_scale;
         assert!(after > before + 0.3, "letting go applies the size dragged to: {before} -> {after}");
         assert!(harness.state().dialog.is_some(), "Preferences stays open");
+    }
+
+    /// The quick Export dialog must offer every copy format the registry has, not just the old
+    /// PDF/PNG/JPEG/GIF list. Video entries open the background job; the Backstage page adds the
+    /// full video options.
+    #[test]
+    fn export_dialog_lists_video_webp_and_markdown_copies() {
+        let mut harness = harness();
+        harness.state_mut().run("app.exportDialog", json!({})).unwrap();
+        harness.run_steps(2);
+        for label in [
+            "PDF document (.pdf)",
+            "PNG images (all slides)",
+            "JPEG image (current slide)",
+            "WebP image (current slide)",
+            "PowerPoint Presentation (.pptx)",
+            "Outline (.txt)",
+            "Markdown outline (.md)",
+            "Animated GIF (.gif)",
+            "MP4 video (.mp4)",
+            "WebM video (.webm)",
+        ] {
+            assert!(harness.query_by_label(label).is_some(), "Export lists {label}");
+        }
     }
 }

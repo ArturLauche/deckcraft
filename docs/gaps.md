@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** major (community PR wave 2026-10-14: soak tests, PPTX corpus, comment threads (#70), embedded fonts, SmartArt Text Pane, Animation Pane timeline, Hunspell spelling, thesaurus, AutoCorrect, 14 new dialogs, pen pressure and trackpad gestures; duplicated entries and headers folded; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** major (video export and the format registry close the old video gap; print colour and layouts narrow printing; share links with enforced access and settings sync land; real-time co-editing is the new collaboration gap; previous: community PR wave 2026-10-14) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -22,7 +22,7 @@ revision history.
 | 3 | PPTX round trip drops media options and rewind (#74, #77) | File format | B | 2–4 | [file-format-parity.md](file-format-parity.md) |
 | 4 | SVG pictures don't render (EMF/WMF do) | File format | B | 4–8 | [file-format-parity.md](file-format-parity.md) |
 | 5 | No localization: English only | Localization | B (infra + 5 languages) | 55–90 | [localization-parity.md](localization-parity.md) |
-| 6 | No printing | Feature | B | 5–8 | [file-format-parity.md](file-format-parity.md) |
+| 6 | Printing goes through PDF; no native print dialog, margins or scaling | Feature | B | 3–5 | [file-format-parity.md](file-format-parity.md) |
 | 7 | Fonts: only Regular, Bold and Italic faces (#69) | Feature | B | 3–5 | [ui-parity.md](ui-parity.md) |
 | 8 | Image paste fails on Windows and Linux (#53) | Feature | B | 2–4 | [ui-parity.md](ui-parity.md) |
 | 9 | Presenter view isn't placed on the second display | Hardware | B | 3–5 | [slideshow-parity.md](slideshow-parity.md) |
@@ -133,18 +133,25 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Impact:** large PDFs; blurry when zoomed or printed.
 - **Estimate:** 5–8 h (vector paths, fills and text through the PDF writer). **Beta blocker.**
 
-### No printing
-- **Evidence:** checklist row "Print" is missing; PR #66 (browser print) is open.
-- **Impact:** handouts and speaker notes are printed in many workplaces.
-- **Estimate:** 5–8 h (print through the PDF path and each OS's print dialog). **Beta blocker.**
+### Printing goes through PDF; no native print dialog, margins or scaling
+- **Evidence:** File ▸ Print renders the selected slides, notes or handouts to PDF and opens it.
+  Scope, ranges, handout layouts 1–9, paper, orientation, frame, and colour/grayscale/black-and-white
+  are in the dialog. It does not call the OS print dialog, and it has no margin or scale controls;
+  the PDF uses fixed notes/handout margins.
+- **Impact:** offices that print handouts want the system print sheet and control over margins.
+  Printing the PDF is a workable fallback.
+- **Estimate:** 3–5 h (OS print sheet on each desktop platform, margin and scale options in
+  `PdfOptions`). **Beta blocker for the native path; the PDF path is usable.**
 
-### No video export; the animated GIF has no transitions or builds
-- **Evidence:** checklist row "Export video (MP4) / animated GIF" is partial: `file.export` writes
-  an animated GIF with one frame per slide (#171), but there is no MP4/MOV export, and the GIF
-  doesn't animate transitions or build animations.
-- **Impact:** sharing a talk as a video is a common request.
-- **Estimate:** 10–16 h (render the timeline frame by frame, which the GIF can then reuse for
-  transitions and builds; an H.264 encoder is the hard part, FilmCraft has one to copy).
+### Video export needs an external ffmpeg; GIF still doesn't animate transitions or builds
+- **Evidence:** `file.export` writes MP4/H.264 and WebM/VP9 with the system `ffmpeg`, including
+  timings, transitions, builds and optional autoplay audio. A missing ffmpeg or encoder is an
+  explicit error. The animated GIF remains one frame per slide, and there is no MOV writer or
+  bundled/hardware encoder.
+- **Impact:** a machine without ffmpeg cannot export video, and the GIF still looks like a
+  slideshow rather than a recording.
+- **Estimate:** 4–8 h (bundle or find a portable encoder, MOV, and reuse the video timeline for the
+  GIF).
 
 ### Embedded MicroType Express font subsets aren't drawn
 - **Evidence:** `p:embeddedFontLst` is read and written. A raw TrueType/OpenType face, or one inside an Embedded OpenType wrapper, is loaded and used to draw. A MicroType Express subset (`application/x-fontdata` with neither form) is kept and written back, and the text still uses a stand-in.
@@ -152,6 +159,15 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Estimate:** 3–5 h.
 
 ## Features
+
+### Real-time co-editing and a self-hostable relay
+- **Evidence:** File ▸ Share issues capability links with viewer, commenter or editor access,
+  expiry, revocation, invitations and participants, and the engine refuses edits for restricted
+  sessions. There is no presence, live cursor, concurrent text merge, collaborative undo or
+  relay/shared-folder journal, so two editors still work on separate copies.
+- **Impact:** teams that expect Google-Docs-style co-authoring cannot use DeckCraft for it yet.
+- **Estimate:** 30–50 h (an operation journal and merge rules in `engine`, a small relay crate with
+  authentication and rooms, presence/cursors in `ui-egui`, reconnect and recovery tests).
 
 ### Font weights beyond Regular, Bold and Italic (#69)
 - **Evidence:** #69; the font database maps a family to four faces.
@@ -284,8 +300,9 @@ Detail in [ui-parity.md](ui-parity.md).
   blocker.**
 - **Format Shape pane thinner than PowerPoint's** (Fill/Line/Effects/Size/Text Box pages, picture
   and texture options, 3-D). 6–10 h. **Beta blocker.**
-- **File tab depth** (#76 landed the Backstage): no online templates, cloud places, printer
-  choice, video/GIF/CD exports or document protection. 4–8 h for the parts that need no cloud.
+- **File tab depth** (#76 landed the Backstage): no online templates, cloud places, native printer
+  choice, CD exports or document protection. Video/GIF export, sharing links and settings sync are
+  in. 4–8 h for the parts that need no cloud.
 - **Window chrome** (#71 macOS controls misaligned, #26 GNOME title bar, #41 system light/dark).
   2–4 h.
 - **Icon consistency across Craft apps** (#73, #56). 2–4 h; coordinate in craftrules.
@@ -354,6 +371,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | major | Video export and the format registry close the old video gap; printing narrows to native print and margins; share links and settings sync land; real-time co-editing added as the collaboration gap |
 | 2026-10-15 | trivial | PPTX trigger sequences keep later On Click steps instead of converting them to After Previous; mixed starts, independent buttons and paragraph builds have synthetic round-trip regressions |
 | 2026-10-16 | trivial | AutoFormat superscripts ordinals (1st, 22nd) as you type, with an AutoCorrect option to turn it off; automatic bulleted lists remain |
 | 2026-10-14 | trivial | Fixed #718: remote MCP no longer accepts unrelated or buffered stale success; loopback regressions cover invalid envelopes, incomplete and oversized frames |

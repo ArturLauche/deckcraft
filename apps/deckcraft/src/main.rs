@@ -88,6 +88,7 @@ fn save_prefs(app: &SlideApp) {
     }
     if let Some(dir) = config_dir() {
         deckcraft_ui_egui::settings::save(&dir, &app.ui, &app.session.prefs);
+        app.sync.persist();
     }
 }
 
@@ -249,8 +250,10 @@ fn main() -> eframe::Result {
                     app.set_status(format!("Recovered {n} unsaved presentation{} from the last session", if n == 1 { "" } else { "s" }));
                 }
             }
-            // File › New lists templates the user saved here beside the built-in starters.
-            app.session.template_dir = config_dir().map(|d| d.join("templates"));
+            // File › New lists templates the user saved here beside the built-in starters, and
+            // settings sync keeps its config and last-sync state here.
+            app.settings_dir = config_dir();
+            app.session.template_dir = app.settings_dir.as_ref().map(|d| d.join("templates"));
             app.integrated_titlebar = cfg!(target_os = "macos");
             if let Some(port) = control_port {
                 let rx = control_server::start(port, cc.egui_ctx.clone());

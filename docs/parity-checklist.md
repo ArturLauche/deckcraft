@@ -1,20 +1,20 @@
 # PowerPoint feature checklist
 
-> **Generated:** 2026-10-14 (bullets/numbering remain D after empty-line marker review; summary by `cargo xtask parity`; rows re-scored by the 2026-10-14 community PR wave, duplicate Thesaurus, AutoCorrect, Artistic effects and Corrections rows folded; Preview in editor re-scored 2026-10-13; earlier rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4; video/animated GIF row re-scored 2026-10-11, #171) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Generated:** 2026-10-19 (summary by `cargo xtask parity`; video, print, template gallery, settings sync and share links re-scored after the 2026-10-19 feature arc; real-time co-authoring added as missing; earlier rows re-scored by the 2026-10-14 community PR wave and 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
-**Weighted breadth parity: 84%** over 191 features.
+**Weighted breadth parity: 84%** over 195 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
-| P1 | 65 | 45 | 16 | 4 | 82% |
-| P2 | 54 | 17 | 25 | 12 | 55% |
+| P1 | 68 | 47 | 17 | 4 | 82% |
+| P2 | 55 | 18 | 25 | 12 | 55% |
 
 | Area | Parity |
 |---|---|
-| Application shell | 81% |
-| Files | 75% |
+| Application shell | 83% |
+| Files | 78% |
 | Slides | 92% |
 | Views | 98% |
 | Masters & themes | 92% |
@@ -30,7 +30,7 @@ The summary between `<!-- SUMMARY -->
 | Transitions | 100% |
 | Animations | 85% |
 | Slide show | 68% |
-| Review | 70% |
+| Review | 61% |
 | Draw | 50% |
 | Undo & clipboard | 100% |
 | Automation (✱) | 100% |
@@ -53,11 +53,13 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Application shell | Light and dark appearance | P1 | D |
 | Application shell | Multiple open presentations | P1 | P |
 | Application shell | Preferences (autosave, units, defaults) | P2 | P |
+| Application shell | Template gallery (10 categories, 17 original starters, search, favourites, user templates) | P1 | D |
+| Application shell | Settings sync (local folder, S3-compatible, Google Drive; per-category) | P2 | D |
 | Files | New blank presentation | P0 | D |
 | Files | Native file format (open/save) | P0 | D |
 | Files | Open PowerPoint .pptx | P0 | D |
 | Files | Save as PowerPoint .pptx | P0 | D |
-| Files | Open/save .potx/.ppsx/.pptm variants (.potx/.ppsx open; saved with the .pptx content type; no .pptm) | P2 | P |
+| Files | Open/save .potx/.ppsx/.pptm variants (.potx/.ppsx open and save with their own content types; no .pptm) | P2 | P |
 | Files | Legacy .ppt (binary) import | P2 | M |
 | Files | Save as template | P1 | D |
 | Files | Autosave and crash recovery | P0 | D |
@@ -65,8 +67,8 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Files | Export to PDF (slides, notes pages, handouts; text layer, links, bookmarks; vector artwork pending) | P0 | P |
 | Files | Export slides as PNG/JPEG | P0 | D |
 | Files | Export outline / RTF | P2 | P |
-| Files | Export video (MP4) / animated GIF (GIF: one frame per slide, no transitions; no video) | P2 | P |
-| Files | Print (slides, handouts, notes, outline) | P1 | M |
+| Files | Export video (MP4/WebM through ffmpeg) / animated GIF (GIF: one frame per slide, no transitions) | P2 | P |
+| Files | Print (slides, handouts, notes; PDF path with colour modes; no native print sheet or margins) | P1 | P |
 | Files | Password protection | P2 | M |
 | Files | Reuse slides from another file | P1 | P |
 | Files | Drag and drop files onto the window | P1 | D |
@@ -222,6 +224,8 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Review | Comments (add, reply, resolve, delete) | P1 | D |
 | Review | Accessibility checker | P2 | D |
 | Review | Compare presentations | P2 | P |
+| Review | Share links with view/comment/edit permissions, expiry and revocation | P1 | D |
+| Review | Real-time co-authoring (presence, cursors, merge, collaborative undo) | P1 | M |
 | Review | Track changes / version history | P2 | M |
 | Draw | Ink pens, highlighter, eraser | P1 | P |
 | Draw | Ink to shape / text | P2 | P |

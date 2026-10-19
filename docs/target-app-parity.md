@@ -1,6 +1,6 @@
 # DeckCraft vs Microsoft PowerPoint: parity assessment
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** major (community PR wave 2026-10-14: breadth 84% over 191 features (P0 92%, P1 82%, P2 55%) after `cargo xtask parity`; area table and What works today folded to one row or bullet each; 320 engine commands; ready ~55% and stage alpha unchanged; previous: minor, hours to ~95% per audience added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (checklist grows to 195 rows with the template gallery, settings sync, share links and real-time co-authoring; video and print re-scored; breadth stays 84%, ready and stage unchanged; previous: community PR wave 2026-10-14) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The authoritative answer to "how close is DeckCraft to PowerPoint, and how much work is left?".
 [ROADMAP.md](../ROADMAP.md) summarizes it; [gaps.md](gaps.md) itemizes every shortfall;
@@ -11,8 +11,8 @@ number.
 
 | Number | Value | Kind |
 |---|---|---|
-| **Feature breadth** (weighted checklist) | **84%** over 191 features (P0 92%, P1 82%, P2 55%) | **measured**: `cargo xtask parity` formula over [parity-checklist.md](parity-checklist.md); rows re-scored by the 2026-10-14 community PR wave |
-| Menu-bar coverage | **59%** (128 of 217 app-specific PowerPoint menu items have a DeckCraft command or UI label of the same name) | **measured** (heuristic lower bound): script matching the 2026-10-07 PowerPoint menu dump against the 226 engine command labels of the d556ff9 snapshot (not re-measured since; the registry is 320 now) and the UI's strings; excludes the app, Window and Help menus and the subtitle language lists |
+| **Feature breadth** (weighted checklist) | **84%** over 195 features (P0 92%, P1 82%, P2 55%) | **measured**: `cargo xtask parity` formula over [parity-checklist.md](parity-checklist.md); rows re-scored by the 2026-10-19 feature arc |
+| Menu-bar coverage | **59%** (128 of 217 app-specific PowerPoint menu items have a DeckCraft command or UI label of the same name) | **measured** (heuristic lower bound): script matching the 2026-10-07 PowerPoint menu dump against the 226 engine command labels of the d556ff9 snapshot (not re-measured since; the registry is 328 now) and the UI's strings; excludes the app, Window and Help menus and the subtitle language lists |
 | **Ready for real work** | **~55%** | **estimated**: weighted dimension table below (was ~56% until the features row was recomputed from written area weights) |
 | **Mainstream practitioner** | **~53%** | **estimated**: [method below](#mainstream-practitioner-and-essentials-user) |
 | **Essentials user** | **~62%** | **estimated**: [method below](#mainstream-practitioner-and-essentials-user) |
@@ -29,7 +29,7 @@ Read it as a floor, not as a second breadth number.
 
 | Audience | Ready | Opus 5.5 agent hours to ~95% | Work that dominates |
 |---|---:|---|---|
-| Full target (ready for real work) | ~55% | 340–600 (~60% parallelizes: ~120–210 h wall clock with 3–4 agents) | Feature depth across all 20 areas, legacy `.ppt`/`.odp` and video export, localization in 11+ languages, GPU raster and hardware decode, AI features |
+| Full target (ready for real work) | ~55% | 340–600 (~60% parallelizes: ~120–210 h wall clock with 3–4 agents) | Feature depth across all 20 areas, legacy `.ppt`/`.odp`, real-time co-editing, localization in 11+ languages, GPU raster and hardware decode, AI features |
 | Mainstream practitioner | ~53% | 150–250 (~50% parallelizes: ~70–120 h with 3 agents) | `.pptx` exchange (real-deck corpus, round-trip losses, EMF/SVG, embedded fonts) 45–75 h; depth in charts, animations, pictures, text, presenting, print/vector PDF 70–110 h; interaction (menu bar, Format Shape pane, font faces, dialogs) 25–40 h; stability 10–20 h |
 | Essentials user | ~62% | 50–90 (~40% parallelizes: ~30–55 h with 2–3 agents) | Opening received decks (corpus subset, EMF, SVG icons) 25–45 h; Windows launch fallback and Close prompt 6–12 h; font faces, Tab, paste, print, show navigation 12–20 h; start screen, menu bar, palette 6–10 h |
 
@@ -72,7 +72,7 @@ The weights are what those users actually depend on, written down so the total c
 | Hardware | 5% | ~40% | 25–45 | [hardware-parity.md](hardware-parity.md) | GPU-composited window (wgpu), but CPU slide raster, software-only video decode, presenter view not placed on the second display, no pen tilt, no pinch zoom |
 | Platforms | 5% | ~80% | 5–10 | [ROADMAP.md](../ROADMAP.md) | Ahead in reach: macOS, Windows x64/x86/arm64, Linux (5 formats), FreeBSD and the web, all from one release workflow. Held back by the Windows GPU crashes and Linux/Windows clipboard gaps |
 | Localization | 5% | ~8% | 55–90 + native review | [localization-parity.md](localization-parity.md) | English only; no string catalog. PowerPoint for Mac ships 26 languages. Bidi and Arabic shaping in slide text exist |
-| Ecosystem (templates, add-ins) | 3% | ~25% | 10–20 | [gaps.md](gaps.md) | 8 original themes and 6 original starter decks; PowerPoint's large template gallery remains; no add-ins or VBA (out of scope by policy) |
+| Ecosystem (templates, add-ins) | 3% | ~25% | 10–20 | [gaps.md](gaps.md) | 12 original themes and 17 original starter decks in 10 categories, with user templates; PowerPoint's large template gallery remains; no add-ins or VBA (out of scope by policy) |
 | AI features | 2% | ~10% | 20–40 (owner decision on models) | [gaps.md](gaps.md) | No Designer, Copilot, Speaker Coach, live subtitles or Translate (all Microsoft cloud services). Agents drive every command over MCP instead |
 | **Total** | 100% | **~55%** (Σ weight × ready = 55.3) | **~365–650** | | |
 | Automation (✱, not weighted) | | ahead | 0 | [mcp.md](mcp.md), [control-protocol.md](control-protocol.md) | Every command is scriptable from the CLI, a JSON control channel and MCP, headless or against the running app; PowerPoint for Mac has AppleScript and VBA only |
@@ -179,8 +179,8 @@ Features row of the dimension table keeps ~62% until the next full re-measure). 
 
 | Area | Weight | Breadth (measured) | Ready (est.) | Hours | Main shortfalls | Doc |
 |---|---:|---:|---:|---|---|---|
-| Application shell | 5 | 81% | ~55% | 8–14 | No native macOS menu bar, contextual tabs and multiple-window handling thinner than PowerPoint's | [ui-parity.md](ui-parity.md) |
-| Files (commands) | 4 | 75% | ~50% | see file formats | Print, passwords, legacy and macro formats, video export; reuse slides is partial | [file-format-parity.md](file-format-parity.md) |
+| Application shell | 5 | 83% | ~55% | 8–14 | No native macOS menu bar, contextual tabs and multiple-window handling thinner than PowerPoint's | [ui-parity.md](ui-parity.md) |
+| Files (commands) | 4 | 78% | ~50% | see file formats | Native print sheet and margins, passwords, legacy and macro formats; reuse slides is partial | [file-format-parity.md](file-format-parity.md) |
 | Slides and sections | 6 | 92% | ~85% | 3–5 | Zoom (summary/section/slide) is partial, copying slides between decks keeps formatting only partly | [parity-checklist.md](parity-checklist.md) |
 | Views | 4 | 98% | ~80% | 3–6 | Arrange All (Grid Options and New Window are in) | [ui-parity.md](ui-parity.md) |
 | Masters and themes | 7 | 92% | ~70% | 8–14 | Notes/Handout master view polish, effect-scheme depth, Designer suggestions | [parity-checklist.md](parity-checklist.md) |
@@ -196,7 +196,7 @@ Features row of the dimension table keeps ~62% until the next full re-measure). 
 | Transitions | 4 | 100% | ~80% | 4–8 | 3-D transitions approximated in 2-D | [animation-parity.md](animation-parity.md) |
 | Animations | 6 | 85% | ~65% | 10–16 | 64 of PowerPoint's ~190 effects, Animation Pane timeline, preview from the selected effect, rewind lost on save (#77) | [animation-parity.md](animation-parity.md) |
 | Slide show and presenter view | 8 | 68% | ~60% | 10–16 | Second-display placement, laser from presenter view, recording, subtitles, ink depth | [slideshow-parity.md](slideshow-parity.md) |
-| Review | 3 | 70% | ~45% | 8–14 | Compare depth, version history, real spelling dictionaries | [file-format-parity.md](file-format-parity.md) |
+| Review | 3 | 61% | ~45% | 8–14 | Real-time co-authoring, compare depth, version history, real spelling dictionaries | [file-format-parity.md](file-format-parity.md) |
 | Draw (ink) | 2 | 50% | ~30% | 5–9 | Pen tilt, ink to math, lasso, ink to shape/text depth | [hardware-parity.md](hardware-parity.md) |
 | Undo and clipboard | 3 | 100% | ~75% | 3–5 | Image paste (#53) | [ui-parity.md](ui-parity.md) |
 | Automation ✱ | — | 100% | ahead | 0 | | [mcp.md](mcp.md) |
@@ -217,8 +217,8 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
   effect schemes (Design ▸ Effects: DeckCraft, Soft, Crisp, Lift, Glow, Plain), backgrounds
   (solid, gradient, picture, pattern; a solid fill's transparency; picture transparency, tile,
   offset, scale, alignment and mirror; Apply to All copies a picture), slide size presets. File ›
-  New also offers 6 original starter decks (Briefing, Lesson, Pitch, Field Notes, Quarterly,
-  Evening Talk).
+  New also offers 17 original starter decks in 10 categories (Briefing, Lesson, Pitch, Field
+  Notes, Quarterly, Evening Talk and more), with previews, search, favourites and user templates.
 - **Shapes:** ~180 preset geometries with adjustment handles, text boxes, pictures (crop,
   corrections, animated GIFs that play and pause), tables with styles, charts (column, bar, line,
   area, pie, doughnut, scatter and more), basic SmartArt, groups, connectors glued to sites,
@@ -251,7 +251,7 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
 - **Files:** `.deckcraft` (zip + JSON), PPTX import/export (also opens `.potx`/`.ppsx`), PDF
   export (slides, notes, handouts 1–9 per page, text layer, links, bookmarks), PNG/JPEG, outline
   text, AutoRecover.
-- **Automation:** 320 engine commands (`cmd!` registrations in `crates/engine/src/cmd/*`), every
+- **Automation:** 328 engine commands (`cmd!` registrations in `crates/engine/src/cmd/*`), every
   one reachable from `deckcraft-cli`, the JSON control channel and MCP. The menu-bar measurement
   and the d556ff9 snapshot still count 226.
 - **Platforms:** signed releases for macOS (universal), Windows x64/x86/arm64, Linux
@@ -282,20 +282,21 @@ which the first 100 hours mostly skipped.
 covered the checklist rows, ribbon depth and performance only (~135 h of it is comparable to this
 document's 140–240 h for features plus 30–50 h for UI). New in this measure: localization (55–90 h;
 there is none yet), hardware (25–45 h), legacy and missing formats including `.ppt`, `.odp`, EMF/WMF
-and video export, a real-deck PPTX corpus, AI features, and the depth bugs users found in features
+and real-time co-editing, a real-deck PPTX corpus, AI features, and the depth bugs users found in features
 scored done (16 open issues).
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Checklist 195 rows: template gallery, settings sync, share links and real-time co-authoring added; video and print re-scored. Breadth stays 84%, ready ~55%, stage alpha |
 | 2026-10-16 | trivial | Arrange shortfall: Align to Slide and Align Selected Objects are in the Align menu. Percentages unchanged |
 | 2026-10-14 | minor | Community PR wave folded: one headline breadth row (84% over 191 features after `cargo xtask parity`; duplicate checklist rows removed), one row per feature area with the latest breadth and shortfalls, one Themes / Slide show / Views / Review / Automation bullet each (320 engine commands). SmartArt ready ~35% (Text Pane, 6e40335) moves the area mean to 62.8%; dimension and headline percentages unchanged |
 | 2026-10-13 | minor | Shapes shortfall "text warp" narrowed to adjust handles: the Transform gallery applies a preset |
 | 2026-10-14 | minor | Media remainder: Insert › Icons places Lucide stroke icons. 3-D models and stock content remain. Headline percentages unchanged; the checklist row stays missing |
 | 2026-10-14 | trivial | Size and Position dialog. Command count 226 → 227. Breadth stays 79%, ready stays ~55%, UI stays ~60% |
 | 2026-10-14 | trivial | 228 commands; Review lists previous and next comment. Breadth stays 79%; the comments checklist row stays D |
-| 2026-10-14 | minor | Ecosystem evidence: six original starter decks. The dimension stays ~25% because PowerPoint's large gallery is still absent |
+| 2026-10-19 | minor | Ecosystem evidence: 17 original starter decks in 10 categories, user templates and a visual gallery. The dimension stays ~25% because PowerPoint's large online gallery and third-party templates are still absent |
 | 2026-10-14 | trivial | Working today: 227 commands. Breadth stays 79%, ready ~55%. The d556ff9 snapshot (226 commands, 27 dialogs) is unchanged |
 | 2026-10-14 | trivial | Working today: 228 commands. Breadth stays 79%, ready ~55%. The d556ff9 snapshot (226 commands, 27 dialogs) is unchanged |
 | 2026-10-14 | minor | What works today: Create New Theme Colors. The d556ff9 snapshot (226 commands, 27 dialogs) and the breadth / ready percentages are unchanged |

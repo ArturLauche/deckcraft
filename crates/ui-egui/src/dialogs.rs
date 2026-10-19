@@ -151,6 +151,9 @@ fn preferences_snapshot(app: &SlideApp) -> Value {
 
 /// Puts back the settings the Preferences dialog opened with (Cancel, Esc, the close button).
 fn restore_preferences(app: &mut SlideApp, d: &Dialog) {
+    if let Some(config) = app.sync.editing_before.take() {
+        app.sync.config = config;
+    }
     let Some(before) = d.params.get("before") else { return };
     if let Some(dark) = before.get("dark").and_then(Value::as_bool)
         && dark != (app.ui.brightness == theme::Brightness::Dark)
@@ -1554,9 +1557,13 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 ("PNG images (current slide)", "png"),
                 ("PNG images (all slides)", "pngAll"),
                 ("JPEG image (current slide)", "jpeg"),
+                ("WebP image (current slide)", "webp"),
                 ("PowerPoint Presentation (.pptx)", "pptx"),
                 ("Outline (.txt)", "outline"),
+                ("Markdown outline (.md)", "markdown"),
                 ("Animated GIF (.gif)", "gif"),
+                ("MP4 video (.mp4)", "mp4"),
+                ("WebM video (.webm)", "webm"),
             ] {
                 if ui.radio(fmt == f, l).clicked() {
                     d.fields.insert("fmt".into(), f.into());
@@ -1600,7 +1607,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                     d.fields.insert("pdfHidden".into(), hidden.to_string());
                 }
             }
-            let png = matches!(fmt.as_str(), "png" | "pngAll");
+            let png = matches!(fmt.as_str(), "png" | "pngAll" | "webp");
             if png {
                 ui.add_space(4.0);
                 let mut clear = d.get("pngTransparent", "false") == "true";
@@ -1615,6 +1622,46 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let gif_params = if fmt == "gif" { gif_options(app, ui, d) } else { Ok(Value::Null) };
             if let Err(e) = &gif_params {
                 ui.label(egui::RichText::new(e).color(Tokens::get(ui.ctx()).text_dim));
+            }
+            let video = matches!(fmt.as_str(), "mp4" | "webm");
+            if video {
+                ui.add_space(4.0);
+                let width = d.get("videoWidth", "1920");
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(120.0, 20.0), egui::Label::new("Size:"));
+                    egui::ComboBox::from_id_salt("export_video_size")
+                        .selected_text(match width.as_str() {
+                            "1280" => "720p",
+                            "3840" => "4K (2160p)",
+                            _ => "1080p",
+                        })
+                        .show_ui(ui, |ui| {
+                            for (w, l) in [("1280", "720p"), ("1920", "1080p"), ("3840", "4K (2160p)")] {
+                                if ui.selectable_label(width == w, l).clicked() {
+                                    d.fields.insert("videoWidth".into(), w.into());
+                                }
+                            }
+                        });
+                });
+                let fps = d.get("videoFps", "30");
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(120.0, 20.0), egui::Label::new("Frame rate:"));
+                    egui::ComboBox::from_id_salt("export_video_fps").selected_text(format!("{fps} fps")).show_ui(ui, |ui| {
+                        for f in ["24", "30", "60"] {
+                            if ui.selectable_label(fps == f, format!("{f} fps")).clicked() {
+                                d.fields.insert("videoFps".into(), f.into());
+                            }
+                        }
+                    });
+                });
+                let mut timings = d.get("videoTimings", "true") == "true";
+                if ui.checkbox(&mut timings, "Use recorded slide timings").changed() {
+                    d.fields.insert("videoTimings".into(), timings.to_string());
+                }
+                if !timings {
+                    field(ui, d, "Seconds per slide:", "videoSeconds", "5");
+                }
+                ui.label(egui::RichText::new("Transitions, builds, audio and quality are on File ▸ Export.").font(crate::theme::font(11.5)));
             }
             let pdf_params = {
                 let (layout, per) = match pdf_layout.as_str() {
@@ -1637,6 +1684,12 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 let extra = match fmt.as_str() {
                     "pdf" => pdf_params,
                     "gif" => gif_params,
+                    "mp4" | "webm" => json!({
+                        "width": d.get("videoWidth", "1920").parse::<u32>().unwrap_or(1920),
+                        "fps": d.get("videoFps", "30").parse::<u32>().unwrap_or(30),
+                        "secondsPerSlide": d.get("videoSeconds", "5").parse::<f64>().unwrap_or(5.0),
+                        "useTimings": d.get("videoTimings", "true") == "true",
+                    }),
                     _ if png && d.get("pngTransparent", "false") == "true" => json!({"transparentBackground": true}),
                     _ => json!({}),
                 };
@@ -2155,7 +2208,11 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         "preferences" => {
             // The controls apply as they change, so the dialog remembers what it opened with and
             // Cancel (or Esc, or the close button: see `show`) puts that back.
+            app.sync.ensure_loaded(app.settings_dir.as_deref());
             if d.params.get("before").is_none() {
+                // The sync config holds credentials, so it is remembered beside the dialog rather
+                // than in its serializable parameters.
+                app.sync.editing_before = Some(app.sync.config.clone());
                 d.params = json!({ "before": preferences_snapshot(app) });
             }
             ui.label(egui::RichText::new("General").font(theme::bold(13.0)));
@@ -2196,9 +2253,14 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 ui.label("Your name (comments):");
                 ui.text_edit_singleline(&mut app.session.prefs.author);
             });
+            crate::syncui::preferences(app, ui);
             let (ok, cancel) = buttons(ui, "Done");
             if cancel {
                 restore_preferences(app, d);
+            }
+            if ok {
+                app.sync.editing_before = None;
+                app.sync.persist();
             }
             ok || cancel
         }
