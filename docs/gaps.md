@@ -360,11 +360,12 @@ Detail in [localization-parity.md](localization-parity.md).
 
 ## Ecosystem
 
-- **Six original starter decks; PowerPoint's large template gallery remains.** File › New and the
-  start screen offer Briefing, Lesson, Pitch, Field Notes, Quarterly and Evening Talk
-  (`file.new {template}`), each a few slides on one of our themes. Dozens of further offline
-  designs, and any online gallery, are still absent. 4–8 h for a larger original set (asset policy:
-  our own designs only).
+- **Seventeen original starter decks; PowerPoint's large template gallery remains.** File › New
+  and the start screen offer 17 decks in 10 categories (`file.new {template}`), each a few slides
+  on one of our themes, with search, favourites and user templates. A starter can take another
+  theme, a generated dark variant and a heading/body font pair (`theme`, `variant`, `fonts`).
+  Dozens of further offline designs, and any online gallery, are still absent. 4–8 h for a larger
+  original set (asset policy: our own designs only).
 - **No add-ins or VBA.** Out of scope by policy; MCP/CLI automation is the alternative.
 
 ## AI features
@@ -446,3 +447,4 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-10 | minor | Noted that no gap blocks alpha (core-workflow gate passes) |
 | 2026-10-10 | major | Created: every gap from the 2026-10-10 re-measure and the 16 open GitHub issues, ranked, with beta blockers marked |
 | 2026-10-19 | minor | Print margins, scaling, custom header/footer, page numbers, fit-to-paper and direct `lp` printing; native OS print sheet remains open |
+| 2026-10-19 | minor | Starter and user templates take a theme override, generated dark variant and heading/body fonts in File › New and `file.new` |

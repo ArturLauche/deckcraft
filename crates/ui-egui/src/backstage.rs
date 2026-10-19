@@ -171,6 +171,44 @@ pub struct UserTemplateEntry {
     pub slides: usize,
 }
 
+/// File › New's optional customisation for the template the user picks next.
+#[derive(Clone, Debug, Default)]
+pub struct TemplateOptions {
+    /// A built-in theme name, or empty for the template's own theme.
+    pub theme: String,
+    /// Use the generated dark variant of that theme.
+    pub dark: bool,
+    /// Optional Latin heading/body typefaces; empty keeps the theme's.
+    pub major: String,
+    pub minor: String,
+}
+
+impl TemplateOptions {
+    /// The `file.new` params for `template` with these options.
+    pub fn params(&self, template: &str) -> Value {
+        let mut v = json!({"template": template});
+        if !self.theme.trim().is_empty() {
+            v["theme"] = json!(self.theme.trim());
+        }
+        if self.dark {
+            v["variant"] = json!("dark");
+        }
+        let major = self.major.trim();
+        let minor = self.minor.trim();
+        if !major.is_empty() || !minor.is_empty() {
+            let mut fonts = serde_json::Map::new();
+            if !major.is_empty() {
+                fonts.insert("major".into(), json!(major));
+            }
+            if !minor.is_empty() {
+                fonts.insert("minor".into(), json!(minor));
+            }
+            v["fonts"] = Value::Object(fonts);
+        }
+        v
+    }
+}
+
 /// The File tab's state while it is open.
 #[derive(Clone, Debug)]
 pub struct Backstage {
@@ -186,6 +224,8 @@ pub struct Backstage {
     /// File › New: the user's templates, read once when the page first needs them.
     pub user_templates: Vec<UserTemplateEntry>,
     pub user_templates_loaded: bool,
+    /// File › New: theme, dark variant and font overrides for the next template chosen.
+    pub template_options: TemplateOptions,
     /// Info: property drafts while a field is being edited.
     props: Vec<String>,
     pub print_scope: PrintScope,
@@ -253,6 +293,7 @@ impl Backstage {
             template_category: "All".into(),
             user_templates: vec![],
             user_templates_loaded: false,
+            template_options: TemplateOptions::default(),
             props: vec![String::new(); PROPERTIES.len()],
             print_scope: PrintScope::All,
             print_range: String::new(),
@@ -647,7 +688,7 @@ fn new_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize, blank: 
 /// Starter decks whose name, summary, category, tags, theme or a slide title matches `query`,
 /// in `category` (`All` or `Favourites`), at most `limit` tiles. Each tile is the deck's first
 /// slide as it will open, rendered once; the star marks a favourite.
-fn template_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize, category: &str) -> bool {
+fn template_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize, category: &str, opts: &TemplateOptions) -> bool {
     let favourites = app.ui.favourite_templates.clone();
     let mut list = deckcraft_engine::templates::matching(query);
     if category.eq_ignore_ascii_case("favourites") {
@@ -661,14 +702,14 @@ fn template_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize, ca
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
         for starter in list.into_iter().take(limit) {
-            template_tile(app, ui, starter);
+            template_tile(app, ui, starter, opts);
         }
     });
     true
 }
 
 /// One template tile: the first slide, the deck's name and category, and a favourite star.
-fn template_tile(app: &mut SlideApp, ui: &mut Ui, starter: &'static deckcraft_engine::templates::Starter) {
+fn template_tile(app: &mut SlideApp, ui: &mut Ui, starter: &'static deckcraft_engine::templates::Starter, opts: &TemplateOptions) {
     let t = Tokens::get(ui.ctx());
     let thumb_w = 210.0;
     let thumb_h = thumb_w * 9.0 / 16.0;
@@ -717,7 +758,7 @@ fn template_tile(app: &mut SlideApp, ui: &mut Ui, starter: &'static deckcraft_en
     p.galley(pos2(rect.left() + 8.0, thumb.bottom() + 7.0), name, t.text);
     p.text(pos2(rect.left() + 8.0, thumb.bottom() + 30.0), Align2::LEFT_TOP, starter.category, theme::font(10.5), t.text_dim);
     if resp.on_hover_text(starter.summary).clicked() {
-        let _ = app.run("file.new", json!({"template": starter.name}));
+        let _ = app.run("file.new", opts.params(starter.name));
     }
 }
 
@@ -763,13 +804,13 @@ fn user_template_tiles(app: &mut SlideApp, ui: &mut Ui, bs: &Backstage, query: &
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
         for entry in list {
-            user_template_tile(app, ui, entry);
+            user_template_tile(app, ui, entry, &bs.template_options);
         }
     });
     true
 }
 
-fn user_template_tile(app: &mut SlideApp, ui: &mut Ui, entry: &UserTemplateEntry) {
+fn user_template_tile(app: &mut SlideApp, ui: &mut Ui, entry: &UserTemplateEntry, opts: &TemplateOptions) {
     let t = Tokens::get(ui.ctx());
     let thumb_w = 210.0;
     let thumb_h = thumb_w * 9.0 / 16.0;
@@ -804,7 +845,7 @@ fn user_template_tile(app: &mut SlideApp, ui: &mut Ui, entry: &UserTemplateEntry
     let detail = format!("Yours · {} slide{}", entry.slides, if entry.slides == 1 { "" } else { "s" });
     p.text(pos2(rect.left() + 8.0, thumb.bottom() + 30.0), Align2::LEFT_TOP, detail, theme::font(10.5), t.text_dim);
     if resp.on_hover_text(entry.path.display().to_string()).clicked() {
-        let _ = app.run("file.new", json!({"template": entry.name}));
+        let _ = app.run("file.new", opts.params(&entry.name));
     }
 }
 
@@ -957,7 +998,7 @@ fn home(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcome) 
         });
     });
     ui.add_space(6.0);
-    template_tiles(app, ui, "", 3, "All");
+    template_tiles(app, ui, "", 3, "All", &bs.template_options);
     ui.add_space(22.0);
     ui.horizontal(|ui| {
         ui.label(RichText::new("Recent").font(theme::bold(16.0)).color(t.text));
@@ -1019,8 +1060,31 @@ fn new_page(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
         }
     });
     ui.add_space(14.0);
+    heading(ui, "Template options");
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
+        ui.label("Theme:");
+        let current = if bs.template_options.theme.is_empty() { "Template's own".to_string() } else { bs.template_options.theme.clone() };
+        egui::ComboBox::from_id_salt("new_template_theme").width(160.0).selected_text(current).show_ui(ui, |ui| {
+            if ui.selectable_label(bs.template_options.theme.is_empty(), "Template's own").clicked() {
+                bs.template_options.theme.clear();
+            }
+            for th in deckcraft_model::theme::builtin_themes() {
+                if ui.selectable_label(bs.template_options.theme == th.name, &th.name).clicked() {
+                    bs.template_options.theme = th.name.clone();
+                }
+            }
+        });
+        ui.checkbox(&mut bs.template_options.dark, "Dark variant");
+        let major = ui.add(egui::TextEdit::singleline(&mut bs.template_options.major).hint_text("Heading font").desired_width(130.0));
+        major.on_hover_text("Latin heading typeface; leave blank for the theme's");
+        let minor = ui.add(egui::TextEdit::singleline(&mut bs.template_options.minor).hint_text("Body font").desired_width(130.0));
+        minor.on_hover_text("Latin body typeface; leave blank for the theme's");
+    });
+    dim(ui, "These apply to the template you choose below. The dark variant is generated from the theme's colours.");
+    ui.add_space(14.0);
     heading(ui, "Templates");
-    let templates = template_tiles(app, ui, &q, usize::MAX, &bs.template_category);
+    let templates = template_tiles(app, ui, &q, usize::MAX, &bs.template_category, &bs.template_options);
     let user = user_template_tiles(app, ui, bs, &q);
     if !templates && !user {
         if bs.template_category.eq_ignore_ascii_case("favourites") && favourites == 0 {

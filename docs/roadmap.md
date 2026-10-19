@@ -1,6 +1,6 @@
 # DeckCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (print margins, scaling, custom header/footer, page numbers, fit-to-paper and direct `lp`; previous: shared-folder live collaboration, video export, format registry, templates, share links, settings sync and print colour) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (template theme/dark/font customisation and print margins, scaling, header/footer, page numbers, fit-to-paper and direct `lp`; previous: shared-folder live collaboration, video export, format registry, templates, share links, settings sync and print colour) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -116,7 +116,7 @@ plan above.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-19 | minor | Shared-folder live collaboration: ordered journals, roles, presence/cursors, snapshot undo and recovery. A socket relay and CRDT merge stay after beta |
-| 2026-10-19 | major | Video export and the format registry narrow output to vector PDF and native print; print gains margins/scaling/header-footer and direct `lp`; 17 starter templates and sharing/settings sync land. Real-time co-editing stays after beta |
+| 2026-10-19 | major | Video export and the format registry narrow output to vector PDF and native print; print gains margins/scaling/header-footer and direct `lp`; 17 starter templates gain theme/dark/font customisation; sharing/settings sync land. Real-time co-editing stays after beta |
 | 2026-10-15 | trivial | PPTX trigger click steps survive save, including by-paragraph builds. Interactive-deck gaps remain media actions, audio triggers and click-box geometry; milestone scope and feature scores unchanged |
 | 2026-10-14 | trivial | M13 reliability: remote MCP validates IDs and envelopes, caps replies and rejects incomplete frames; #718 |
 | 2026-10-14 | minor | Community PR wave folded: one Review gate row, one Current focus item 2, one beta row each for items 9 and 10 (timeline and timer controls are in), one after-beta paragraph, one M9 and M10 row, one corpus row in the 2026-10-07 history |

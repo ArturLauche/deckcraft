@@ -1,6 +1,6 @@
 # PowerPoint feature checklist
 
-> **Generated:** 2026-10-19 (summary by `cargo xtask parity`; print re-scored after margins/scaling/header-footer/direct `lp` landed; real-time co-authoring partial after the shared-folder journal; video, template gallery, settings sync and share links re-scored after the 2026-10-19 feature arc; earlier rows re-scored by the 2026-10-14 community PR wave and 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Generated:** 2026-10-19 (summary by `cargo xtask parity`; template customisation and print margins/scaling/header-footer/direct `lp` re-scored; real-time co-authoring partial after the shared-folder journal; video, template gallery, settings sync and share links re-scored after the 2026-10-19 feature arc; earlier rows re-scored by the 2026-10-14 community PR wave and 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
 **Weighted breadth parity: 84%** over 195 features.
@@ -53,7 +53,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Application shell | Light and dark appearance | P1 | D |
 | Application shell | Multiple open presentations | P1 | P |
 | Application shell | Preferences (autosave, units, defaults) | P2 | P |
-| Application shell | Template gallery (10 categories, 17 original starters, search, favourites, user templates) | P1 | D |
+| Application shell | Template gallery (10 categories, 17 original starters, search, favourites, user templates, theme/dark/font customisation) | P1 | D |
 | Application shell | Settings sync (local folder, S3-compatible, Google Drive; per-category) | P2 | D |
 | Files | New blank presentation | P0 | D |
 | Files | Native file format (open/save) | P0 | D |

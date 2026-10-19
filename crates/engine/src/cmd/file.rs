@@ -13,7 +13,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "New Presentation",
             ["File"],
             Some("Cmd+N"),
-            "{theme?: name, template?: starter name, size?: [w,h] pt, blank?: bool}",
+            "{theme?: name, template?: starter or user template, variant?: light|dark, fonts?: {major?, minor?}, size?: [w,h] pt, blank?: bool}",
             always,
             new
         ),
@@ -142,6 +142,55 @@ fn formats(_s: &mut Session, _p: &Value) -> Result<Value> {
 
 /// A template saved by the user (desktop), or an error naming the built-ins when there is no
 /// such template.
+#[derive(Default)]
+struct FontOverrides {
+    major: Option<String>,
+    minor: Option<String>,
+}
+
+/// `fonts` from File › New: optional heading/body Latin typefaces, bounded and trimmed. A value
+/// that isn't a string is an error rather than a silent default.
+fn font_overrides(p: &Value) -> Result<FontOverrides> {
+    let Some(v) = p.get("fonts") else { return Ok(FontOverrides::default()) };
+    let obj = v.as_object().ok_or_else(|| bad("file.new", "`fonts` must be an object with `major` and/or `minor`"))?;
+    let mut out = FontOverrides::default();
+    for (key, slot) in [("major", &mut out.major), ("minor", &mut out.minor)] {
+        match obj.get(key) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(name)) => {
+                let name: String = name.trim().chars().take(80).collect();
+                if !name.is_empty() {
+                    *slot = Some(name);
+                }
+            }
+            Some(_) => return Err(bad("file.new", format!("`fonts.{key}` must be a font name"))),
+        }
+    }
+    Ok(out)
+}
+
+/// Apply File › New's theme override, dark variant and font pair to every master.
+fn apply_new_style(doc: &mut Presentation, theme: Option<deckcraft_model::Theme>, dark: bool, fonts: &FontOverrides) {
+    for master in &mut doc.masters {
+        let m = std::sync::Arc::make_mut(master);
+        if let Some(t) = theme.clone() {
+            m.theme = t;
+        }
+        if dark {
+            m.theme = deckcraft_model::theme::dark_variant(&m.theme);
+        }
+        if fonts.major.is_some() || fonts.minor.is_some() {
+            if let Some(name) = &fonts.major {
+                m.theme.fonts.major.latin = name.clone();
+            }
+            if let Some(name) = &fonts.minor {
+                m.theme.fonts.minor.latin = name.clone();
+            }
+            m.theme.fonts.name = "Custom".into();
+        }
+    }
+}
+
 fn user_template(s: &Session, name: &str) -> Result<Presentation> {
     #[cfg(target_arch = "wasm32")]
     let _ = s;
@@ -177,23 +226,38 @@ fn save_template(_s: &mut Session, _p: &Value) -> Result<Value> {
 fn new(s: &mut Session, p: &Value) -> Result<Value> {
     let template = str_param(p, "template").filter(|t| !t.is_empty());
     let theme_name = str_param(p, "theme").filter(|t| !t.is_empty());
-    if template.is_some() && theme_name.is_some() {
-        return Err(bad("file.new", "pass `theme` or `template`, not both"));
-    }
     if template.is_some() && bool_or(p, "blank", false) {
         return Err(bad("file.new", "a template is not a blank presentation"));
     }
+    let variant = str_param(p, "variant").unwrap_or("light").trim().to_ascii_lowercase();
+    if !matches!(variant.as_str(), "light" | "dark") {
+        return Err(bad("file.new", format!("variant “{variant}” isn't light or dark")));
+    }
+    let fonts = font_overrides(p)?;
+    let theme_override = match theme_name {
+        Some(name) => Some(theme_named(name).ok_or_else(|| {
+            let names = deckcraft_model::theme::builtin_themes().into_iter().map(|t| t.name).collect::<Vec<_>>().join(", ");
+            bad("file.new", format!("no theme `{name}`; use {names}"))
+        })?),
+        None => None,
+    };
     let size = slide_size(p);
-    let (doc, template_name) = if let Some(name) = template {
+    let (mut doc, template_name) = if let Some(name) = template {
         if let Some(t) = crate::templates::find(name) {
             (crate::templates::build(t.name, size)?, Some(t.name.to_string()))
         } else {
             (user_template(s, name)?, Some(name.to_string()))
         }
     } else {
-        let theme = theme_name.and_then(theme_named).unwrap_or_default();
+        let theme = theme_override.clone().unwrap_or_default();
         (defaults::blank_presentation(size, theme, !bool_or(p, "blank", false)), None)
     };
+    if template.is_some() {
+        apply_new_style(&mut doc, theme_override, variant == "dark", &fonts);
+    } else {
+        // A blank already took the theme; dark/fonts still apply on top of it.
+        apply_new_style(&mut doc, None, variant == "dark", &fonts);
+    }
     let slides = doc.slides.len();
     let title = s.next_untitled();
     let i = s.add_document(DocState::new(doc, None, title));
@@ -945,5 +1009,33 @@ mod tests {
         assert_eq!(o.margin, None);
         assert_eq!(o.scale, 100.0);
         assert!(!o.page_numbers && !o.fit_paper);
+    }
+
+    #[test]
+    fn a_template_takes_a_theme_override_dark_variant_and_fonts() {
+        let mut s = crate::Session::with_new();
+        s.execute(
+            "file.new",
+            &json!({"template": "Briefing", "theme": "Ember", "variant": "dark", "fonts": {"major": "Inter", "minor": "Open Sans"}}),
+        )
+        .unwrap();
+        let doc = s.doc().unwrap().doc.clone();
+        let theme = &doc.masters[0].theme;
+        assert_eq!(theme.name, "Ember Dark");
+        assert_eq!(theme.fonts.major.latin, "Inter");
+        assert_eq!(theme.fonts.minor.latin, "Open Sans");
+        assert_eq!(theme.fonts.name, "Custom");
+        assert!(theme.colors.colors[1].luminance() < 0.2, "dark page");
+        assert!(theme.colors.colors[0].contrast(theme.colors.colors[1]) >= 7.0);
+        assert_eq!(doc.slides.len(), 5, "the starter's slides are kept");
+    }
+
+    #[test]
+    fn new_rejects_bad_template_options() {
+        let mut s = crate::Session::with_new();
+        assert!(s.execute("file.new", &json!({"variant": "sepia"})).is_err());
+        assert!(s.execute("file.new", &json!({"theme": "No Such Theme"})).is_err());
+        assert!(s.execute("file.new", &json!({"fonts": "Inter"})).is_err());
+        assert!(s.execute("file.new", &json!({"fonts": {"major": 3}})).is_err());
     }
 }

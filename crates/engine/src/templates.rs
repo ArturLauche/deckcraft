@@ -777,15 +777,17 @@ mod tests {
     }
 
     #[test]
-    fn unknown_blank_and_theme_are_refused() {
+    fn unknown_blank_and_theme_are_refused_but_a_theme_override_is_allowed() {
         let mut s = Session::new();
         let unknown = s.execute("file.new", &json!({"template": "Ion"})).unwrap_err();
         assert!(unknown.to_string().contains("Briefing"), "{unknown}");
-        let both = s.execute("file.new", &json!({"template": "Lesson", "theme": "Harbor"})).unwrap_err();
-        assert!(both.to_string().contains("not both"), "{both}");
+        let unknown_theme = s.execute("file.new", &json!({"template": "Lesson", "theme": "No Such Theme"})).unwrap_err();
+        assert!(unknown_theme.to_string().contains("no theme"), "{unknown_theme}");
         let blank = s.execute("file.new", &json!({"template": "Lesson", "blank": true})).unwrap_err();
         assert!(blank.to_string().contains("blank"), "{blank}");
         assert!(s.active().is_none());
+        s.execute("file.new", &json!({"template": "Lesson", "theme": "Harbor"})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.masters[0].theme.name, "Harbor");
     }
 
     #[test]

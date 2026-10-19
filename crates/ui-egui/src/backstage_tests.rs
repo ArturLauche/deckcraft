@@ -577,3 +577,22 @@ fn print_slides_follow_the_settings() {
     assert_eq!(print_params(&bs, &[1])["margin"], 216.0);
     assert_eq!(print_params(&bs, &[1])["scale"], 10.0);
 }
+
+#[test]
+fn template_options_build_custom_new_params() {
+    let mut o = TemplateOptions::default();
+    assert_eq!(o.params("Briefing"), json!({"template": "Briefing"}));
+    o.theme = "Ember".into();
+    o.dark = true;
+    o.major = "Inter".into();
+    o.minor = "Open Sans".into();
+    assert_eq!(
+        o.params("Briefing"),
+        json!({"template": "Briefing", "theme": "Ember", "variant": "dark", "fonts": {"major": "Inter", "minor": "Open Sans"}})
+    );
+    o.theme.clear();
+    o.dark = false;
+    o.major = "  ".into();
+    o.minor = "Lato".into();
+    assert_eq!(o.params("Lesson"), json!({"template": "Lesson", "fonts": {"minor": "Lato"}}));
+}

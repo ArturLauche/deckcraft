@@ -290,6 +290,44 @@ pub fn builtin_themes() -> Vec<Theme> {
     ]
 }
 
+/// A dark counterpart of `theme`: a deep background, light text, and accents lifted until they
+/// stay legible on it. Used by File ▸ New's Dark template variant; the fonts are unchanged.
+pub fn dark_variant(theme: &Theme) -> Theme {
+    let c = theme.colors.colors;
+    // Pick a dark base for the background: the theme's dark text colour when it is dark, else its
+    // dark secondary. Keep the hue and saturation, but make the lightness clearly dark.
+    let base = if c[0].luminance() < 0.3 { c[0] } else { c[2] };
+    let (h, sat, _) = base.to_hsl();
+    let bg = Rgba::from_hsl(h, sat.clamp(0.08, 0.45), 0.10, 255);
+    let light = if c[1].contrast(bg) >= 7.0 { c[1] } else { Rgba::WHITE };
+    let lift = |col: Rgba| {
+        if col.contrast(bg) >= 3.0 {
+            col
+        } else {
+            let (h, s, _) = col.to_hsl();
+            Rgba::from_hsl(h, s.max(0.25), 0.68, col.a)
+        }
+    };
+    let mut colors = c;
+    colors[0] = light;
+    colors[1] = bg;
+    colors[2] = lift(c[3]);
+    // `lt2` is a surface, not text: lift it just enough to separate from the page without
+    // pretending to be a readable foreground.
+    colors[3] = Rgba::from_hsl(h, sat.clamp(0.08, 0.45), 0.18, 255);
+    for slot in &mut colors[4..] {
+        *slot = lift(*slot);
+    }
+    let name = format!("{} Dark", theme.name);
+    Theme {
+        name: name.clone(),
+        colors: ColorScheme { name, colors },
+        fonts: theme.fonts.clone(),
+        format: theme.format.clone(),
+        raw_extra: theme.raw_extra.clone(),
+    }
+}
+
 /// Named colour schemes for Design ▸ Variants ▸ Colors.
 pub fn builtin_color_schemes() -> Vec<ColorScheme> {
     let mut v: Vec<ColorScheme> = builtin_themes().into_iter().map(|t| t.colors).collect();
@@ -382,4 +420,27 @@ pub fn builtin_format_schemes() -> Vec<FormatScheme> {
     plain.effects = vec![Effects::default(), Effects::default(), Effects::default()];
 
     vec![default_format(), soft, crisp, lift, glow_scheme, plain]
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    #[test]
+    fn dark_variant_keeps_text_and_accents_legible() {
+        for theme in builtin_themes() {
+            let dark = dark_variant(&theme);
+            assert!(dark.name.ends_with(" Dark"));
+            let bg = dark.colors.colors[1];
+            assert!(bg.luminance() < 0.2, "{} background is dark", theme.name);
+            assert!(dark.colors.colors[0].contrast(bg) >= 7.0, "{} text", theme.name);
+            for i in [2, 4, 5, 6, 7, 8, 9, 10, 11] {
+                let c = dark.colors.colors[i];
+                assert!(c.contrast(bg) >= 3.0, "{} slot {i}: {c:?} on {bg:?}", theme.name);
+            }
+            assert_eq!(dark.fonts, theme.fonts);
+        }
+    }
 }
