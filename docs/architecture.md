@@ -63,7 +63,10 @@ by device id, and refuses a remote whose revision is older than the last one see
 local folder, S3-compatible storage (signed through `curl --aws-sigv4`) and Google Drive (OAuth
 refresh token through `curl`); the engine owns the merge and the UI worker owns the thread and the
 progress state. Credentials live in an owner-only config file (`0600` on Unix) and never in a
-snapshot.
+snapshot. Encryption is opt-in: the snapshot is encrypted with AES-256-GCM under an Argon2id key
+from a passphrase, in an envelope with a random salt and nonce; a plain remote is re-uploaded
+encrypted when the user turns it on, and a wrong passphrase or altered ciphertext is an explicit
+error. The passphrase lives in the same owner-only config so automatic sync can run.
 
 ## Live collaboration
 
@@ -169,3 +172,4 @@ shaping for notes and footers; slide layout, rasterization, font selection, text
 links and outlines remain app-owned. PDF embedding and all Hayro production dependencies
 are disabled. Native builds enable parallel compression on the same pinned Krilla backend;
 WASM keeps it disabled. Generated-PDF assertions use a std-only parser as a development dependency.
+| 2026-10-19 | minor | Optional AES-256-GCM/Argon2id encryption for settings sync, with plaintext migration |

@@ -148,6 +148,7 @@ impl SyncUi {
         }
         let config = self.config.clone();
         let selected = config.selected();
+        let passphrase = if config.encrypt { Some(config.passphrase.clone()).filter(|p| !p.trim().is_empty()) } else { None };
         let mut state = self.state.clone();
         let state_path = dir.join(STATE_FILE);
         let shared = Arc::new(Mutex::new(State::Running));
@@ -157,7 +158,7 @@ impl SyncUi {
             std::thread::spawn(move || {
                 let result = (|| -> deckcraft_engine::Result<(Report, SyncState)> {
                     let mut transport = sync::transport(&config)?;
-                    let report = sync::sync(transport.as_mut(), &local, &selected, &mut state)?;
+                    let report = sync::sync_with(transport.as_mut(), &local, &selected, &mut state, passphrase.as_deref())?;
                     sync::save_state(&state_path, &state)?;
                     Ok((report, state))
                 })();
@@ -411,6 +412,17 @@ pub fn preferences(app: &mut SlideApp, ui: &mut Ui) {
             }
         }
         ui.add_space(4.0);
+        ui.checkbox(&mut config.encrypt, "Encrypt remote settings");
+        if config.encrypt {
+            text_row(ui, "Passphrase", &mut config.passphrase, true);
+            ui.label(
+                egui::RichText::new(
+                    "AES-256-GCM with an Argon2id key. The passphrase is kept in the owner-only sync settings so automatic sync can run.",
+                )
+                .font(crate::theme::font(11.5)),
+            );
+        }
+        ui.add_space(4.0);
         ui.label(egui::RichText::new("Categories").font(crate::theme::bold(12.0)));
         let selected = config.selected();
         egui::Grid::new("sync-categories").num_columns(2).show(ui, |ui| {
@@ -438,12 +450,13 @@ pub fn preferences(app: &mut SlideApp, ui: &mut Ui) {
                 .font(crate::theme::font(11.5)),
         );
     }
-    app.sync.config = config;
+    app.sync.config = config.sanitized();
 
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         let running = app.sync.job.as_ref().is_some_and(Job::running);
-        if ui.add_enabled(!running && app.sync.config.enabled, egui::Button::new("Sync now")).clicked() {
+        let ready = !app.sync.config.encrypt || !app.sync.config.passphrase.trim().is_empty();
+        if ui.add_enabled(!running && app.sync.config.enabled && ready, egui::Button::new("Sync now")).clicked() {
             app.sync_now();
         }
         if running {
@@ -673,6 +686,36 @@ mod tests {
         assert!(app.sync.job.is_none(), "the worker did not finish");
         assert!(app.sync.status.contains("uploaded") || app.sync.status.contains("up to date"), "{}", app.sync.status);
         assert!(remote.join("settings.json").is_file());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_worker_encrypts_the_remote_when_asked() {
+        let d = dir("encrypted-worker");
+        let remote = d.join("remote");
+        std::fs::create_dir_all(&remote).unwrap();
+        let mut app = app();
+        app.settings_dir = Some(d.clone());
+        app.sync.ensure_loaded(Some(&d));
+        app.sync.config.enabled = true;
+        app.sync.config.provider = Provider::LocalFolder;
+        app.sync.config.local_folder = remote.to_string_lossy().to_string();
+        app.sync.config.categories = vec!["appearance".into()];
+        app.sync.config.encrypt = true;
+        app.sync.config.passphrase = "a test passphrase".into();
+        app.sync_now();
+        for _ in 0..400 {
+            app.sync_tick(1.0);
+            if app.sync.job.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(app.sync.job.is_none(), "the worker did not finish: {}", app.sync.status);
+        let bytes = std::fs::read(remote.join("settings.json")).unwrap();
+        assert!(sync::is_encrypted(&bytes));
+        assert!(sync::parse_with(&bytes, Some("a test passphrase")).unwrap().is_some());
         let _ = std::fs::remove_dir_all(&d);
     }
 }

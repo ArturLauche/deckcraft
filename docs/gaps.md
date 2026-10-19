@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (shared-folder live collaboration lands with ordered journals, roles, presence, cursors, snapshot undo and recovery; a socket relay and CRDT merge remain; previous: video export, format registry, print colour, share links and settings sync) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (template customisation and optional encryption for settings sync land; shared-folder live collaboration still needs a relay and CRDT merge; previous: print margins, video export, format registry, share links) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -448,3 +448,4 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-10 | major | Created: every gap from the 2026-10-10 re-measure and the 16 open GitHub issues, ranked, with beta blockers marked |
 | 2026-10-19 | minor | Print margins, scaling, custom header/footer, page numbers, fit-to-paper and direct `lp` printing; native OS print sheet remains open |
 | 2026-10-19 | minor | Starter and user templates take a theme override, generated dark variant and heading/body fonts in File › New and `file.new` |
+| 2026-10-19 | minor | Settings sync can encrypt its remote snapshot with AES-256-GCM/Argon2id; enabling it re-uploads a plain remote |

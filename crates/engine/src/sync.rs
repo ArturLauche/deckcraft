@@ -18,6 +18,13 @@ use serde_json::Value;
 
 use crate::{EngineError, Result};
 
+#[cfg(not(target_arch = "wasm32"))]
+use aes_gcm::aead::{Aead, Payload};
+#[cfg(not(target_arch = "wasm32"))]
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+#[cfg(not(target_arch = "wasm32"))]
+use argon2::{Algorithm, Argon2, Params, Version};
+
 /// A snapshot bigger than this is refused: settings are small, and a huge remote file would be a
 /// denial of service rather than a settings file.
 const MAX_SNAPSHOT_BYTES: usize = 1 << 20;
@@ -375,6 +382,10 @@ pub struct SyncConfig {
     /// Category ids; empty means [`Category::defaults`].
     pub categories: Vec<String>,
     pub local_folder: String,
+    /// Encrypt the remote snapshot with `passphrase` (AES-256-GCM, Argon2id-derived key).
+    pub encrypt: bool,
+    /// Kept in the owner-only config so automatic sync can run; cleared when encryption is off.
+    pub passphrase: String,
     pub s3: S3Config,
     pub drive: DriveConfig,
 }
@@ -388,6 +399,8 @@ impl Default for SyncConfig {
             interval_minutes: 30,
             categories: Category::defaults().iter().map(|c| c.id().to_string()).collect(),
             local_folder: String::new(),
+            encrypt: false,
+            passphrase: String::new(),
             s3: S3Config::default(),
             drive: DriveConfig::default(),
         }
@@ -416,6 +429,11 @@ impl SyncConfig {
         }
         self.drive.file_name = clean(self.drive.file_name(), 128);
         self.drive.folder_id = clean(&self.drive.folder_id, 128);
+        if !self.encrypt {
+            self.passphrase.clear();
+        } else {
+            self.passphrase = self.passphrase.chars().take(256).collect();
+        }
         self
     }
 
@@ -529,14 +547,146 @@ pub fn encode(snapshot: &Snapshot) -> Result<Vec<u8>> {
     serde_json::to_vec_pretty(snapshot).map_err(|e| EngineError::Other(format!("can't encode the settings snapshot: {e}")))
 }
 
+/// The encrypted envelope written when sync encryption is on.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Envelope {
+    format: String,
+    version: u32,
+    kdf: String,
+    salt: String,
+    nonce: String,
+    ciphertext: String,
+}
+
+const ENCRYPTED_FORMAT: &str = "deckcraft-sync-encrypted";
+const ENCRYPTED_AAD: &[u8] = b"deckcraft-sync-v1";
+
+fn hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
+fn unhex(text: &str) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) || text.len() > 4 << 20 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(text.len() / 2);
+    for pair in text.as_bytes().as_chunks::<2>().0 {
+        let s = std::str::from_utf8(pair).ok()?;
+        out.push(u8::from_str_radix(s, 16).ok()?);
+    }
+    Some(out)
+}
+
+/// Is `bytes` an encrypted sync envelope? Used to explain a missing passphrase before parsing.
+pub fn is_encrypted(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(bytes).ok().and_then(|v| v.get("format").and_then(Value::as_str).map(|f| f == ENCRYPTED_FORMAT)).unwrap_or(false)
+}
+
+/// Encrypt `snapshot` with `passphrase`, or return plain JSON when it is empty/absent.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn encode_with(snapshot: &Snapshot, passphrase: Option<&str>) -> Result<Vec<u8>> {
+    let Some(pass) = passphrase.map(str::trim).filter(|p| !p.is_empty()) else {
+        return encode(snapshot);
+    };
+    let plain = encode(snapshot)?;
+    let mut salt = [0u8; 16];
+    let mut nonce = [0u8; 12];
+    getrandom::getrandom(&mut salt).map_err(|e| EngineError::Other(format!("couldn't get randomness for sync encryption: {e}")))?;
+    getrandom::getrandom(&mut nonce).map_err(|e| EngineError::Other(format!("couldn't get randomness for sync encryption: {e}")))?;
+    let params = Params::new(19 * 1024, 2, 1, Some(32)).map_err(|e| EngineError::Other(format!("sync encryption parameters: {e}")))?;
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut key = [0u8; 32];
+    argon.hash_password_into(pass.as_bytes(), &salt, &mut key).map_err(|e| EngineError::Other(format!("couldn't derive the sync key: {e}")))?;
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| EngineError::Other("couldn't set up sync encryption".into()))?;
+    let ciphertext = cipher
+        .encrypt(Nonce::from_slice(&nonce), Payload { msg: &plain, aad: ENCRYPTED_AAD })
+        .map_err(|_| EngineError::Other("couldn't encrypt the settings snapshot".into()))?;
+    let envelope = Envelope {
+        format: ENCRYPTED_FORMAT.into(),
+        version: 1,
+        kdf: "argon2id".into(),
+        salt: hex(&salt),
+        nonce: hex(&nonce),
+        ciphertext: hex(&ciphertext),
+    };
+    serde_json::to_vec_pretty(&envelope).map_err(|e| EngineError::Other(format!("can't encode the encrypted snapshot: {e}")))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn encode_with(snapshot: &Snapshot, passphrase: Option<&str>) -> Result<Vec<u8>> {
+    if passphrase.is_some_and(|p| !p.trim().is_empty()) {
+        return Err(EngineError::Other("encrypted settings sync is not available in the browser".into()));
+    }
+    encode(snapshot)
+}
+
+/// Parse plain or encrypted bytes. An encrypted envelope needs the matching passphrase; plain
+/// JSON is still accepted so enabling encryption migrates the next upload.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn parse_with(bytes: &[u8], passphrase: Option<&str>) -> Result<Option<Snapshot>> {
+    if !is_encrypted(bytes) {
+        return parse(bytes);
+    }
+    let Some(pass) = passphrase.map(str::trim).filter(|p| !p.is_empty()) else {
+        return Err(EngineError::Other("the remote settings are encrypted; enter the sync passphrase".into()));
+    };
+    let env: Envelope = serde_json::from_slice(bytes).map_err(|e| EngineError::Other(format!("the encrypted settings envelope is damaged: {e}")))?;
+    if env.version != 1 || !env.kdf.eq_ignore_ascii_case("argon2id") {
+        return Err(EngineError::Other(format!("the remote settings use an unsupported encryption version ({})", env.version)));
+    }
+    let salt = unhex(&env.salt).ok_or_else(|| EngineError::Other("the encrypted settings have a damaged salt".into()))?;
+    let nonce = unhex(&env.nonce).ok_or_else(|| EngineError::Other("the encrypted settings have a damaged nonce".into()))?;
+    let ciphertext = unhex(&env.ciphertext).ok_or_else(|| EngineError::Other("the encrypted settings have damaged ciphertext".into()))?;
+    if salt.len() != 16 || nonce.len() != 12 || ciphertext.len() < 16 {
+        return Err(EngineError::Other("the encrypted settings envelope has impossible lengths".into()));
+    }
+    let params = Params::new(19 * 1024, 2, 1, Some(32)).map_err(|e| EngineError::Other(format!("sync encryption parameters: {e}")))?;
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut key = [0u8; 32];
+    argon.hash_password_into(pass.as_bytes(), &salt, &mut key).map_err(|e| EngineError::Other(format!("couldn't derive the sync key: {e}")))?;
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| EngineError::Other("couldn't set up sync decryption".into()))?;
+    let plain = cipher
+        .decrypt(Nonce::from_slice(&nonce), Payload { msg: &ciphertext, aad: ENCRYPTED_AAD })
+        .map_err(|_| EngineError::Other("the sync passphrase is wrong, or the remote settings were altered".into()))?;
+    parse(&plain)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn parse_with(bytes: &[u8], passphrase: Option<&str>) -> Result<Option<Snapshot>> {
+    if is_encrypted(bytes) {
+        return Err(EngineError::Other("encrypted settings sync is not available in the browser".into()));
+    }
+    let _ = passphrase;
+    parse(bytes)
+}
+
 /// Pull, merge and push one snapshot through `transport`.
 ///
 /// `local` is the snapshot built from the settings on this computer; `state` is updated in place
 /// (call [`SyncState::sanitized`] after loading it). A remote that is missing is created. The
 /// upload is skipped when the merged bytes equal the remote ones.
 pub fn sync(transport: &mut dyn Transport, local: &Snapshot, selected: &[Category], state: &mut SyncState) -> Result<Report> {
+    sync_with(transport, local, selected, state, None)
+}
+
+/// [`sync`] with an optional encryption passphrase. A remote encrypted with a different
+/// passphrase is an error; a plain remote is accepted and re-uploaded encrypted.
+pub fn sync_with(
+    transport: &mut dyn Transport,
+    local: &Snapshot,
+    selected: &[Category],
+    state: &mut SyncState,
+    passphrase: Option<&str>,
+) -> Result<Report> {
     let remote_bytes = transport.load()?;
-    let remote = remote_bytes.as_deref().map(parse).transpose()?.flatten();
+    let remote_is_encrypted = remote_bytes.as_deref().is_some_and(is_encrypted);
+    let want_encrypted = passphrase.is_some_and(|p| !p.trim().is_empty());
+    let remote = remote_bytes.as_deref().map(|b| parse_with(b, passphrase)).transpose()?.flatten();
     let (merged, applied, pushed, conflicts, stale) = match &remote {
         Some(r) => {
             let m = merge(local, r, selected, state);
@@ -561,8 +711,10 @@ pub fn sync(transport: &mut dyn Transport, local: &Snapshot, selected: &[Categor
     }
     // Compare parsed snapshots, not bytes: a remote file saved with different whitespace is still
     // the same settings and must not be rewritten (or grow a revision) on every sync.
-    let upload = remote.as_ref() != Some(&merged);
-    let bytes = encode(&merged)?;
+    // A plain remote is re-uploaded when encryption is turned on even if the settings did not
+    // change, so enabling encryption actually protects the next snapshot.
+    let upload = remote.as_ref() != Some(&merged) || (want_encrypted && remote.is_some() && !remote_is_encrypted);
+    let bytes = encode_with(&merged, passphrase)?;
     if upload {
         transport.save(&bytes)?;
     }

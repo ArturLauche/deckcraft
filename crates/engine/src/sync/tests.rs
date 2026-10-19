@@ -468,3 +468,59 @@ fn transport_for_config_rejects_an_empty_folder() {
     let config = SyncConfig { provider: Provider::LocalFolder, local_folder: "/tmp/x".into(), ..SyncConfig::default() };
     assert_eq!(transport(&config).unwrap().provider(), Provider::LocalFolder);
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn encrypted_snapshots_need_the_right_passphrase_and_detect_tampering() {
+    let s = snap("dev", 3, &[("appearance", 10, json!({"dark": true}))]);
+    let bytes = encode_with(&s, Some("correct horse")).unwrap();
+    assert!(is_encrypted(&bytes));
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(!text.contains("appearance") && !text.contains("dark"), "plaintext leaked: {text}");
+    assert_eq!(parse_with(&bytes, Some("correct horse")).unwrap(), Some(s.clone()));
+    assert!(parse_with(&bytes, Some("wrong")).is_err());
+    assert!(parse_with(&bytes, None).is_err());
+    let mut v: Value = serde_json::from_slice(&bytes).unwrap();
+    let ct = v["ciphertext"].as_str().unwrap();
+    let mut chars: Vec<char> = ct.chars().collect();
+    chars[0] = if chars[0] == '0' { '1' } else { '0' };
+    let flipped: String = chars.into_iter().collect();
+    v["ciphertext"] = json!(flipped);
+    let tampered = serde_json::to_vec(&v).unwrap();
+    assert!(parse_with(&tampered, Some("correct horse")).is_err());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn enabling_encryption_reuploads_a_plain_remote() {
+    let dir = temp_dir("encrypt");
+    let mut transport = FolderTransport { dir: dir.clone() };
+    let selected = Category::defaults();
+    let local = snapshot("dev-a", &selected, &values(&[("appearance", json!({"dark": true}))]), None);
+    let mut state = SyncState::default();
+    sync_with(&mut transport, &local, &selected, &mut state, None).unwrap();
+    let plain = crate::io::read_app_file(&dir.join("settings.json")).unwrap();
+    assert!(!is_encrypted(&plain));
+
+    let report = sync_with(&mut transport, &local, &selected, &mut state, Some("secret")).unwrap();
+    assert!(report.uploaded, "turning encryption on uploads the same settings encrypted");
+    let encrypted = crate::io::read_app_file(&dir.join("settings.json")).unwrap();
+    assert!(is_encrypted(&encrypted));
+    assert_eq!(parse_with(&encrypted, Some("secret")).unwrap().unwrap().categories, local.categories);
+
+    let again = sync_with(&mut transport, &local, &selected, &mut state, Some("secret")).unwrap();
+    assert!(!again.uploaded, "an unchanged encrypted sync does not rewrite");
+    assert!(sync_with(&mut transport, &local, &selected, &mut state, Some("wrong")).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn encryption_passphrases_are_bounded_and_cleared_when_off() {
+    let mut c = SyncConfig { encrypt: true, passphrase: "x".repeat(1000), ..SyncConfig::default() };
+    c = c.sanitized();
+    assert_eq!(c.passphrase.chars().count(), 256);
+    c.encrypt = false;
+    c = c.sanitized();
+    assert!(c.passphrase.is_empty());
+}

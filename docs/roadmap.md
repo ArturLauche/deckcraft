@@ -1,6 +1,6 @@
 # DeckCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (template theme/dark/font customisation and print margins, scaling, header/footer, page numbers, fit-to-paper and direct `lp`; previous: shared-folder live collaboration, video export, format registry, templates, share links, settings sync and print colour) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (template theme/dark/font customisation, encrypted settings sync, and print margins/scaling/header/footer/direct `lp`; previous: shared-folder live collaboration, video export, format registry, templates, share links and settings sync) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in

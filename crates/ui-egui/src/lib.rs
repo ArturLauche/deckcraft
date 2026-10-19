@@ -857,6 +857,10 @@ impl SlideApp {
             self.sync.status = "Turn on settings sync first.".into();
             return;
         }
+        if self.sync.config.encrypt && self.sync.config.passphrase.trim().is_empty() {
+            self.sync.status = "Enter a sync passphrase, or turn encryption off.".into();
+            return;
+        }
         self.sync.persist();
         let local = self.sync.local_snapshot(self);
         self.sync.start(dir, local, self.last_time);
@@ -883,6 +887,9 @@ impl SlideApp {
             }
         }
         if !self.sync.config.enabled || !self.sync.config.auto || self.sync.job.is_some() {
+            return;
+        }
+        if self.sync.config.encrypt && self.sync.config.passphrase.trim().is_empty() {
             return;
         }
         let Some(dir) = self.settings_dir.clone() else { return };
