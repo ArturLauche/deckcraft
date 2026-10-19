@@ -261,6 +261,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     pointer(app, ui, &resp, xf);
     if !app.anim_preview_active() {
         overlays(app, ui, &painter, xf, &t);
+        draw_collab_cursors(app, &painter, xf, slide_rect);
+        publish_collab_cursor(app, ui, slide_rect);
         ime_output(app, ui, xf);
         media_bar(app, ui, xf);
         gif_buttons(app, ui, xf, &gifs);
@@ -1323,6 +1325,45 @@ fn grid_line_step(spacing: f64, scale: f32) -> Option<f32> {
         return None;
     }
     Some(step)
+}
+
+/// Other editors' pointers, normalized to the slide and drawn in their presence colour.
+fn draw_collab_cursors(app: &SlideApp, painter: &egui::Painter, xf: Xf, slide_rect: Rect) {
+    let Some(status) = app.session.collab_status() else { return };
+    let Some(d) = app.session.active() else { return };
+    let current = d.selection.slide;
+    let (w, h) = (d.doc.slide_size.width, d.doc.slide_size.height);
+    for peer in status.peers.iter().filter(|p| p.id != status.peer && p.slide == Some(current)) {
+        let (Some(x), Some(y)) = (peer.x, peer.y) else { continue };
+        let at = xf.to_screen(Point::new(f64::from(x) * w, f64::from(y) * h));
+        if !slide_rect.expand(24.0).contains(at) {
+            continue;
+        }
+        let color = Color32::from_rgb(peer.color[0], peer.color[1], peer.color[2]);
+        painter.circle_filled(at, 4.5, color);
+        painter.circle_stroke(at, 6.0, Stroke::new(1.0, Color32::WHITE));
+        painter.text(at + vec2(8.0, -12.0), Align2::LEFT_BOTTOM, &peer.name, theme::font(11.0), color);
+    }
+}
+
+/// Publish this window's pointer to the journal, normalized to the slide. The engine throttles
+/// writes, so a moving pointer costs at most ten small files a second.
+fn publish_collab_cursor(app: &mut SlideApp, ui: &Ui, slide_rect: Rect) {
+    if app.session.collab.is_none() {
+        return;
+    }
+    let Some(pos) = ui.ctx().input(|i| i.pointer.hover_pos()) else {
+        app.session.collab_clear_cursor();
+        return;
+    };
+    if !slide_rect.contains(pos) || slide_rect.width() <= 0.0 || slide_rect.height() <= 0.0 {
+        app.session.collab_clear_cursor();
+        return;
+    }
+    let Some(slide) = app.session.active().map(|d| d.selection.slide) else { return };
+    let x = ((pos.x - slide_rect.min.x) / slide_rect.width()).clamp(0.0, 1.0);
+    let y = ((pos.y - slide_rect.min.y) / slide_rect.height()).clamp(0.0, 1.0);
+    app.session.collab_cursor(slide, x, y);
 }
 
 fn draw_grid(painter: &egui::Painter, slide: Rect, step: f32) {

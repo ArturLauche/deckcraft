@@ -62,6 +62,51 @@ pub enum PageLayout {
     Handouts { per_page: u8 },
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+/// How printed slide artwork is coloured.
+pub enum ColorMode {
+    /// The slide's own colours.
+    #[default]
+    Color,
+    /// Luminance greys, for a mono printer that still shows shades.
+    Grayscale,
+    /// Pure black and white, for a fax or a high-contrast handout.
+    BlackAndWhite,
+}
+
+impl ColorMode {
+    /// Read the Print page's `color` id.
+    pub fn parse(id: &str) -> Option<ColorMode> {
+        match id.trim().to_ascii_lowercase().as_str() {
+            "color" | "colour" => Some(ColorMode::Color),
+            "grayscale" | "greyscale" | "gray" | "grey" => Some(ColorMode::Grayscale),
+            "blackandwhite" | "black-and-white" | "bw" | "mono" | "monochrome" => Some(ColorMode::BlackAndWhite),
+            _ => None,
+        }
+    }
+
+    /// Apply the mode to one straight RGBA pixel. Alpha is kept.
+    pub fn pixel(self, px: &mut [u8; 4]) {
+        let lum = (u32::from(px[0]) * 2126 + u32::from(px[1]) * 7152 + u32::from(px[2]) * 722 + 5000) / 10_000;
+        match self {
+            ColorMode::Color => {}
+            ColorMode::Grayscale => {
+                let v = lum.min(255) as u8;
+                px[0] = v;
+                px[1] = v;
+                px[2] = v;
+            }
+            ColorMode::BlackAndWhite => {
+                let v = if lum >= 128 { 255 } else { 0 };
+                px[0] = v;
+                px[1] = v;
+                px[2] = v;
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PdfOptions {
@@ -79,6 +124,20 @@ pub struct PdfOptions {
     pub title: Option<String>,
     /// Handout/notes page size in points (default US Letter portrait; see [`paper_size`]).
     pub paper: (f64, f64),
+    /// Colour, greyscale or black-and-white slide artwork.
+    pub color: ColorMode,
+    /// Page margin in points. `None` keeps the layout's historical margins (72 pt at the sides of
+    /// notes pages, 54 pt around handouts); print sets an explicit value.
+    pub margin: Option<f64>,
+    /// Slide artwork scale in percent (100 = fit). Notes and handouts scale around each box.
+    pub scale: f64,
+    /// Custom printed header and footer, one line each. Empty = none.
+    pub header: Option<String>,
+    pub footer: Option<String>,
+    /// Print a page number in the footer (in addition to a master's own page number).
+    pub page_numbers: bool,
+    /// Full-page slides: use `paper` and `margin` instead of a slide-sized PDF page.
+    pub fit_paper: bool,
 }
 
 impl Default for PdfOptions {
@@ -92,6 +151,13 @@ impl Default for PdfOptions {
             frame_slides: true,
             title: None,
             paper: (612.0, 792.0),
+            color: ColorMode::Color,
+            margin: None,
+            scale: 100.0,
+            header: None,
+            footer: None,
+            page_numbers: false,
+            fit_paper: false,
         }
     }
 }
@@ -126,6 +192,21 @@ pub fn notes_slide_box(paper: (f64, f64), aspect: f64) -> Rect {
     Rect::new(x, 54.0, x + w, 54.0 + h)
 }
 
+/// [`notes_slide_box`] with an explicit margin in points (top, sides and the notes area).
+pub fn notes_slide_box_with(paper: (f64, f64), aspect: f64, margin: f64) -> Rect {
+    let (pw, ph) = paper;
+    let margin = margin.clamp(0.0, 216.0);
+    let mut w = (pw - 2.0 * margin).max(1.0);
+    let mut h = w / aspect.max(0.01);
+    let max_h = (ph * 0.5 - margin.min(54.0)).max(1.0);
+    if h > max_h {
+        h = max_h;
+        w = h * aspect;
+    }
+    let x = (pw - w) / 2.0;
+    Rect::new(x, margin.max(0.0), x + w, margin.max(0.0) + h)
+}
+
 /// Export `pres` as PDF bytes.
 pub fn export(pres: &Presentation, opts: &PdfOptions) -> Result<Vec<u8>> {
     write::guard(|| export_inner(pres, opts))
@@ -151,17 +232,23 @@ fn export_inner(pres: &Presentation, opts: &PdfOptions) -> Result<Vec<u8>> {
     let pdf = writer.document_mut();
 
     let (sw, sh) = (pres.slide_size.width.max(1.0), pres.slide_size.height.max(1.0));
+    let aspect = sw / sh;
+    let scale = (opts.scale / 100.0).clamp(0.1, 2.0);
     let mut ex = Exporter { pres, opts, fonts: HashMap::new() };
     // Page plan: per page, the slides on it with their boxes (page points).
     let pages: Vec<Vec<(usize, Rect)>> = match opts.layout {
-        PageLayout::Slides => slides.iter().map(|&i| vec![(i, Rect::new(0.0, 0.0, sw, sh))]).collect(),
-        PageLayout::Notes => {
-            let b = notes_frames(pres, opts.paper).0;
+        PageLayout::Slides if opts.fit_paper => {
+            let b = fit_slide_box(opts.paper, aspect, opts.margin, scale);
             slides.iter().map(|&i| vec![(i, b)]).collect()
         }
+        PageLayout::Slides => slides.iter().map(|&i| vec![(i, scale_box(Rect::new(0.0, 0.0, sw, sh), scale))]).collect(),
+        PageLayout::Notes => {
+            let b = notes_frames_with(pres, opts.paper, opts.margin).0;
+            slides.iter().map(|&i| vec![(i, scale_box(b, scale))]).collect()
+        }
         PageLayout::Handouts { per_page } => {
-            let boxes = handout_boxes(per_page, opts.paper, sw / sh);
-            slides.chunks(boxes.len()).map(|c| c.iter().zip(&boxes).map(|(i, b)| (*i, *b)).collect()).collect()
+            let boxes = handout_boxes_with(per_page, opts.paper, aspect, opts.margin.unwrap_or(54.0));
+            slides.chunks(boxes.len()).map(|c| c.iter().zip(&boxes).map(|(i, b)| (*i, scale_box(*b, scale))).collect()).collect()
         }
     };
     // Bookmarks and slide → page lookup for internal links.
@@ -177,8 +264,9 @@ fn export_inner(pres: &Presentation, opts: &PdfOptions) -> Result<Vec<u8>> {
     }
     pdf.set_outline(outline);
 
-    for v in &pages {
+    for (page_index, v) in pages.iter().enumerate() {
         let (pw, ph) = match opts.layout {
+            PageLayout::Slides if opts.fit_paper => opts.paper,
             PageLayout::Slides => (sw, sh),
             _ => opts.paper,
         };
@@ -209,6 +297,7 @@ fn export_inner(pres: &Presentation, opts: &PdfOptions) -> Result<Vec<u8>> {
                 }
                 PageLayout::Slides => {}
             }
+            ex.custom_page_texts(&mut s, pw, ph, page_index + 1)?;
             s.finish();
         }
         for a in annots {
@@ -230,6 +319,12 @@ fn master_rect(pres: &Presentation, m: &deckcraft_model::Master, kind: deckcraft
 /// A notes page's slide box and notes area on `paper`: where the notes master puts its slide image
 /// and body placeholders, or the default layout when it has none.
 pub fn notes_frames(pres: &Presentation, paper: (f64, f64)) -> (Rect, Rect) {
+    notes_frames_with(pres, paper, None)
+}
+
+/// [`notes_frames`] with an explicit margin; `None` keeps the historical 72 pt sides and 54 pt
+/// bottom.
+pub fn notes_frames_with(pres: &Presentation, paper: (f64, f64), margin: Option<f64>) -> (Rect, Rect) {
     let (pw, ph) = paper;
     let aspect = pres.slide_size.width.max(1.0) / pres.slide_size.height.max(1.0);
     let nm = pres.notes_master.as_deref();
@@ -239,12 +334,34 @@ pub fn notes_frames(pres: &Presentation, paper: (f64, f64)) -> (Rect, Rect) {
             let (w, h) = if f.width() / f.height() > aspect { (f.height() * aspect, f.height()) } else { (f.width(), f.width() / aspect) };
             Rect::from_center_size(f.center(), (w, h))
         }
-        None => notes_slide_box(paper, aspect),
+        None => match margin {
+            Some(m) => notes_slide_box_with(paper, aspect, m),
+            None => notes_slide_box(paper, aspect),
+        },
     };
-    let notes = nm
-        .and_then(|m| master_rect(pres, m, deckcraft_model::PhType::Body, paper))
-        .unwrap_or_else(|| Rect::new(72.0, slide.y1 + 36.0, pw - 72.0, ph - 54.0));
+    let notes = nm.and_then(|m| master_rect(pres, m, deckcraft_model::PhType::Body, paper)).unwrap_or_else(|| match margin {
+        Some(m) => {
+            let m = m.clamp(0.0, 216.0);
+            Rect::new(m, slide.y1 + 36.0, pw - m, ph - m.max(54.0))
+        }
+        None => Rect::new(72.0, slide.y1 + 36.0, pw - 72.0, ph - 54.0),
+    });
     (slide, notes)
+}
+
+/// A full-page slide fitted on `paper`, inside `margin`, at `scale` percent.
+fn fit_slide_box(paper: (f64, f64), aspect: f64, margin: Option<f64>, scale: f64) -> Rect {
+    let (pw, ph) = paper;
+    let m = margin.unwrap_or(36.0).clamp(0.0, 216.0);
+    let (aw, ah) = ((pw - 2.0 * m).max(1.0), (ph - 2.0 * m).max(1.0));
+    let (w, h) = if aw / ah > aspect { (ah * aspect, ah) } else { (aw, aw / aspect) };
+    let (w, h) = (w * scale, h * scale);
+    Rect::from_center_size(kurbo::Point::new(pw / 2.0, ph / 2.0), (w, h))
+}
+
+/// Scale a slide box around its centre for notes and handouts.
+fn scale_box(b: Rect, scale: f64) -> Rect {
+    if (scale - 1.0).abs() < f64::EPSILON { b } else { Rect::from_center_size(b.center(), (b.width() * scale, b.height() * scale)) }
 }
 
 /// How a master's header, date, footer or page number is printed: its own resolved formatting.
@@ -351,8 +468,14 @@ pub fn master_texts(pres: &Presentation, m: &deckcraft_model::Master, paper: (f6
 
 /// Slide boxes for a handout page (portrait paper, half-inch-ish margins).
 pub fn handout_boxes(per_page: u8, paper: (f64, f64), aspect: f64) -> Vec<Rect> {
+    handout_boxes_with(per_page, paper, aspect, 54.0)
+}
+
+/// [`handout_boxes`] with an explicit margin in points.
+pub fn handout_boxes_with(per_page: u8, paper: (f64, f64), aspect: f64, margin: f64) -> Vec<Rect> {
     let (pw, ph) = paper;
-    let (mx, top, bottom) = (54.0, 54.0, 54.0);
+    let margin = margin.clamp(0.0, 216.0);
+    let (mx, top, bottom) = (margin, margin, margin);
     let (cols, rows, notes) = match per_page {
         0 | 1 => (1, 1, false),
         2 => (1, 2, false),
@@ -412,13 +535,14 @@ fn straight(rgba: &mut [u8]) {
 
 /// A backdrop raster as one PDF image, composited onto white (slides are normally opaque). Equal
 /// backdrops become equal images, which the writer stores once.
-fn backdrop(mut img: deckcraft_render::Image) -> Image {
+fn backdrop(mut img: deckcraft_render::Image, color: ColorMode) -> Image {
     for px in img.pixels.as_chunks_mut::<4>().0 {
         let a = px[3] as u32;
         for c in &mut px[..3] {
             *c = (*c as u32 + (255 - a)).min(255) as u8;
         }
         px[3] = 255;
+        color.pixel(px);
     }
     Image::from_rgba8(img.pixels, img.width, img.height)
 }
@@ -452,11 +576,16 @@ impl Exporter<'_> {
             && let Some(size) = Size::from_wh(b.width() as f32, b.height() as f32)
         {
             s.push_transform(&Transform::from_translate(b.x0 as f32, b.y0 as f32));
-            s.draw_image(backdrop(back), size);
+            s.draw_image(backdrop(back, self.opts.color), size);
             // Taken, not copied: a print-resolution slide is ~16 MB.
             let mut rgba = front.pixels;
             if rgba.as_chunks::<4>().0.iter().any(|px| px[3] != 0) {
                 straight(&mut rgba);
+                if self.opts.color != ColorMode::Color {
+                    for px in rgba.as_chunks_mut::<4>().0 {
+                        self.opts.color.pixel(px);
+                    }
+                }
                 s.draw_image(Image::from_rgba8(rgba, w, h), size);
             }
             s.pop();
@@ -637,6 +766,40 @@ impl Exporter<'_> {
         }
         Ok(())
     }
+    /// A custom printed header/footer and, for full-page slides, a page number. Notes and
+    /// handouts already print the master's page number (or the fallback footer), so they are not
+    /// doubled.
+    fn custom_page_texts(&mut self, s: &mut Surface, pw: f64, ph: f64, n: usize) -> Result<()> {
+        let opts = self.opts;
+        let header = opts.header.as_deref().map(str::trim).filter(|t| !t.is_empty());
+        let footer = opts.footer.as_deref().map(str::trim).filter(|t| !t.is_empty());
+        let number = opts.page_numbers && matches!(opts.layout, PageLayout::Slides);
+        if header.is_none() && footer.is_none() && !number {
+            return Ok(());
+        }
+        let margin = opts.margin.unwrap_or(36.0).clamp(0.0, 216.0);
+        let x = margin.max(2.0);
+        let y = (margin * 0.35).max(2.0);
+        let bottom = ph - (margin * 0.35).max(12.0);
+        let (font, _) = self.ui_font()?;
+        s.set_fill(Some(grey(0x60, 1.0)));
+        if let Some(header) = header {
+            let line = header.lines().next().unwrap_or("");
+            // Sit inside the top margin so a fitted slide (which starts at `margin`) is not
+            // overprinted.
+            s.draw_text(Point::from_xy(x as f32, y as f32), font.clone(), 9.0, line, false, TextDirection::Auto);
+        }
+        if let Some(footer) = footer {
+            let line = footer.lines().next().unwrap_or("");
+            s.draw_text(Point::from_xy(x as f32, bottom as f32), font.clone(), 9.0, line, false, TextDirection::Auto);
+        }
+        if number {
+            s.draw_text(Point::from_xy((pw - margin - 18.0).max(0.0) as f32, bottom as f32), font, 9.0, &n.to_string(), false, TextDirection::Auto);
+        }
+        s.set_fill(None);
+        Ok(())
+    }
+
     fn footer(&mut self, s: &mut Surface, pw: f64, ph: f64, n: usize) -> Result<()> {
         let (font, _) = self.ui_font()?;
         s.set_fill(Some(grey(0x60, 1.0)));

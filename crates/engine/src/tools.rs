@@ -438,6 +438,17 @@ impl Session {
 
     /// Feed a pointer event to the active tool. Returns what happened (for agents).
     pub fn pointer(&mut self, ev: PointerEvent) -> Result<Value> {
+        // A shared presentation with view/comment access takes no canvas edits. Hovering still
+        // works (the cursor and guides follow the pointer), but a press could start a move,
+        // resize, text edit or shape; refuse it here as well as in `execute`, because pointer
+        // gestures edit the document directly.
+        let access = self.active().map(|d| d.access).unwrap_or(crate::sharing::Access::Full);
+        if access != crate::sharing::Access::Full && !matches!(ev.kind, PointerKind::Move) {
+            return Err(crate::EngineError::Disabled(
+                "pointer".into(),
+                format!("this presentation is shared for {}; save a copy to edit it", access.label().to_lowercase()),
+            ));
+        }
         let tol = if ev.tol > 0.0 { ev.tol } else { 4.0 };
         let p = Point::new(ev.x, ev.y);
         self.tool.pressure = ev.pressure.filter(|v| v.is_finite()).map(|v| v.clamp(0.0, 1.0));

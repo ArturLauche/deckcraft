@@ -638,6 +638,17 @@ fn with_user<T>(f: impl FnOnce(&HashSet<String>) -> T) -> Option<T> {
     u.words.as_ref().map(f)
 }
 
+/// The words in the user dictionary, sorted. Used by settings sync; an unreadable dictionary is
+/// an empty list rather than an error.
+pub fn user_words() -> Vec<String> {
+    with_user(|u| {
+        let mut words: Vec<String> = u.iter().cloned().collect();
+        words.sort();
+        words
+    })
+    .unwrap_or_default()
+}
+
 /// Add `word` to the user dictionary file (and to checks from now on).
 pub fn add_user_word(word: &str) -> std::io::Result<()> {
     use std::io::Write;

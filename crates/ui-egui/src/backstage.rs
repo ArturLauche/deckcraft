@@ -33,6 +33,7 @@ pub enum Page {
     New,
     Open,
     Info,
+    Share,
     SaveAs,
     Print,
     Export,
@@ -40,7 +41,7 @@ pub enum Page {
 }
 
 impl Page {
-    pub const ALL: [Page; 8] = [Page::Home, Page::New, Page::Open, Page::Info, Page::SaveAs, Page::Print, Page::Export, Page::Account];
+    pub const ALL: [Page; 9] = [Page::Home, Page::New, Page::Open, Page::Info, Page::Share, Page::SaveAs, Page::Print, Page::Export, Page::Account];
 
     /// The id `app.backstage {page}` takes.
     pub fn id(self) -> &'static str {
@@ -49,6 +50,7 @@ impl Page {
             Page::New => "new",
             Page::Open => "open",
             Page::Info => "info",
+            Page::Share => "share",
             Page::SaveAs => "saveAs",
             Page::Print => "print",
             Page::Export => "export",
@@ -68,6 +70,7 @@ impl Page {
             Page::New => "New",
             Page::Open => "Open",
             Page::Info => "Info",
+            Page::Share => "Share",
             Page::SaveAs => "Save As",
             Page::Print => "Print",
             Page::Export => "Export",
@@ -81,6 +84,7 @@ impl Page {
             Page::New => Icon::NewFile,
             Page::Open => Icon::OpenFolder,
             Page::Info => Icon::Info,
+            Page::Share => Icon::Share,
             Page::SaveAs => Icon::SaveAs,
             Page::Print => Icon::Print,
             Page::Export => Icon::Export,
@@ -127,7 +131,15 @@ impl Nav {
 pub fn entries(has_doc: bool) -> (Vec<Nav>, Vec<Nav>) {
     let mut top = vec![Nav::Page(Page::Home), Nav::Page(Page::New), Nav::Page(Page::Open)];
     if has_doc {
-        top.extend([Nav::Page(Page::Info), Nav::Save, Nav::Page(Page::SaveAs), Nav::Page(Page::Print), Nav::Page(Page::Export), Nav::Close]);
+        top.extend([
+            Nav::Page(Page::Info),
+            Nav::Save,
+            Nav::Page(Page::Share),
+            Nav::Page(Page::SaveAs),
+            Nav::Page(Page::Print),
+            Nav::Page(Page::Export),
+            Nav::Close,
+        ]);
     }
     (top, vec![Nav::Page(Page::Account), Nav::Options])
 }
@@ -145,7 +157,56 @@ pub enum PrintScope {
 pub enum ExportTask {
     Pdf,
     Handouts,
+    Video,
+    Gif,
     FileType,
+}
+
+/// A template the user saved, as File › New lists it.
+#[derive(Clone, Debug)]
+pub struct UserTemplateEntry {
+    pub name: String,
+    pub path: std::path::PathBuf,
+    pub theme: String,
+    pub slides: usize,
+}
+
+/// File › New's optional customisation for the template the user picks next.
+#[derive(Clone, Debug, Default)]
+pub struct TemplateOptions {
+    /// A built-in theme name, or empty for the template's own theme.
+    pub theme: String,
+    /// Use the generated dark variant of that theme.
+    pub dark: bool,
+    /// Optional Latin heading/body typefaces; empty keeps the theme's.
+    pub major: String,
+    pub minor: String,
+}
+
+impl TemplateOptions {
+    /// The `file.new` params for `template` with these options.
+    pub fn params(&self, template: &str) -> Value {
+        let mut v = json!({"template": template});
+        if !self.theme.trim().is_empty() {
+            v["theme"] = json!(self.theme.trim());
+        }
+        if self.dark {
+            v["variant"] = json!("dark");
+        }
+        let major = self.major.trim();
+        let minor = self.minor.trim();
+        if !major.is_empty() || !minor.is_empty() {
+            let mut fonts = serde_json::Map::new();
+            if !major.is_empty() {
+                fonts.insert("major".into(), json!(major));
+            }
+            if !minor.is_empty() {
+                fonts.insert("minor".into(), json!(minor));
+            }
+            v["fonts"] = Value::Object(fonts);
+        }
+        v
+    }
 }
 
 /// The File tab's state while it is open.
@@ -158,6 +219,13 @@ pub struct Backstage {
     pub focus: Option<usize>,
     /// Search text on Home, New and Open.
     pub query: String,
+    /// File › New: the chosen template category (`All`, `Favourites`, or a [`deckcraft_engine::templates::CATEGORIES`] entry).
+    pub template_category: String,
+    /// File › New: the user's templates, read once when the page first needs them.
+    pub user_templates: Vec<UserTemplateEntry>,
+    pub user_templates_loaded: bool,
+    /// File › New: theme, dark variant and font overrides for the next template chosen.
+    pub template_options: TemplateOptions,
     /// Info: property drafts while a field is being edited.
     props: Vec<String>,
     pub print_scope: PrintScope,
@@ -169,14 +237,50 @@ pub struct Backstage {
     /// Notes and handouts: a paper id from [`deckcraft_engine::cmd::file::PAPERS`] and its orientation.
     pub print_paper: &'static str,
     pub print_landscape: bool,
+    /// `color`, `grayscale` or `blackAndWhite`: printed slide artwork.
+    pub print_color: &'static str,
+    /// Page margin in points, slide scale in percent, and optional printed header/footer lines.
+    pub print_margin: f32,
+    pub print_scale: f32,
+    pub print_header: String,
+    pub print_footer: String,
+    pub print_numbers: bool,
+    /// Send the PDF to the default printer with `lp` instead of opening it in the viewer.
+    pub print_direct: bool,
+    /// Full-page slides: fit the slide on the chosen paper instead of a slide-sized page.
+    pub print_fit_paper: bool,
     pub preview_page: usize,
     pub export: ExportTask,
-    /// Export › Change File Type / Save As: the chosen type (an [`SAVE_TYPES`] id).
+    /// Export › Change File Type / Save As: the chosen type (an [`save_types`] id).
     pub file_type: &'static str,
     pub handouts_per_page: u8,
     pub pdf_hidden: bool,
+    /// PDF export: raster resolution and whether the invisible text layer is kept.
+    pub pdf_dpi: f32,
+    pub pdf_text_layer: bool,
     /// Export › Change File Type › PNG: leave the slide background out (#784).
     pub png_transparent: bool,
+    /// Picture export: every slide, and the scale (pixels per point).
+    pub png_all: bool,
+    pub image_scale: f32,
+    /// Animated GIF export.
+    pub gif_width: u32,
+    pub gif_seconds: f32,
+    pub gif_loop: bool,
+    pub gif_hidden: bool,
+    /// Video export (MP4/WebM).
+    pub video_format: &'static str,
+    pub video_width: u32,
+    pub video_fps: u32,
+    pub video_seconds: f32,
+    pub video_timings: bool,
+    pub video_transitions: bool,
+    pub video_animations: bool,
+    pub video_audio: bool,
+    pub video_quality: u8,
+    pub video_hidden: bool,
+    /// File › Share: fields and the last share.info result.
+    pub share: crate::sharingui::State,
 }
 
 impl Backstage {
@@ -186,6 +290,10 @@ impl Backstage {
             docs,
             focus: None,
             query: String::new(),
+            template_category: "All".into(),
+            user_templates: vec![],
+            user_templates_loaded: false,
+            template_options: TemplateOptions::default(),
             props: vec![String::new(); PROPERTIES.len()],
             print_scope: PrintScope::All,
             print_range: String::new(),
@@ -194,12 +302,39 @@ impl Backstage {
             print_frame: true,
             print_paper: "letter",
             print_landscape: false,
+            print_color: "color",
+            print_margin: 36.0,
+            print_scale: 100.0,
+            print_header: String::new(),
+            print_footer: String::new(),
+            print_numbers: true,
+            print_direct: false,
+            print_fit_paper: false,
             preview_page: 0,
             export: ExportTask::Pdf,
             file_type: "pptx",
             handouts_per_page: 3,
             pdf_hidden: false,
+            pdf_dpi: 200.0,
+            pdf_text_layer: true,
             png_transparent: false,
+            png_all: false,
+            image_scale: 2.0,
+            gif_width: 960,
+            gif_seconds: 2.0,
+            gif_loop: true,
+            gif_hidden: false,
+            video_format: "mp4",
+            video_width: 1920,
+            video_fps: 30,
+            video_seconds: 5.0,
+            video_timings: true,
+            video_transitions: true,
+            video_animations: true,
+            video_audio: true,
+            video_quality: 60,
+            video_hidden: false,
+            share: crate::sharingui::State::default(),
         }
     }
 
@@ -213,15 +348,13 @@ impl Backstage {
     }
 }
 
-/// Save As and Change File Type: (id for [`SlideApp::export_as`], label, detail).
-pub const SAVE_TYPES: [(&str, &str, &str); 6] = [
-    ("pptx", "PowerPoint Presentation (*.pptx)", "Opens in PowerPoint and other presentation apps"),
-    ("deckcraft", "DeckCraft Presentation (*.deckcraft)", "DeckCraft's own format: everything is kept"),
-    ("pdf", "PDF (*.pdf)", "A fixed copy that keeps its layout on any device"),
-    ("outline", "Outline (*.txt)", "The slide titles and bullet text as plain text"),
-    ("png", "PNG Picture (*.png)", "The current slide as a picture"),
-    ("jpeg", "JPEG Picture (*.jpg)", "The current slide as a compressed picture"),
-];
+/// Save As and Change File Type: every format the engine writes, as (id for
+/// [`SlideApp::export_as`]/[`SlideApp::save_as_dialog`], label, detail). The registry
+/// ([`deckcraft_engine::formats`]) is the source of truth, so the UI can't offer a format the
+/// engine doesn't write or hide one it does.
+pub fn save_types() -> Vec<(&'static str, String, &'static str)> {
+    deckcraft_engine::formats::FORMATS.iter().map(|f| (f.id, format!("{} (*.{})", f.label, f.extension), f.description)).collect()
+}
 
 /// Info page properties: (`file.properties` key, label, hint).
 const PROPERTIES: [(&str, &str, &str); 7] = [
@@ -414,6 +547,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                     Page::New => new_page(app, ui, &mut bs),
                     Page::Open => open_page(app, ui, &mut bs),
                     Page::Info => info(app, ui, &mut bs),
+                    Page::Share => crate::sharingui::page(app, ui, &mut bs.share),
                     Page::SaveAs => save_as(app, ui, &mut bs, &mut out),
                     Page::Print => print(app, ui, &mut bs),
                     Page::Export => export(app, ui, &mut bs),
@@ -551,22 +685,168 @@ fn new_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize, blank: 
     true
 }
 
-/// Starter decks whose name, summary, theme or a slide title matches `query`, at most `limit` tiles.
-fn template_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) -> bool {
-    let list = deckcraft_engine::templates::matching(query);
+/// Starter decks whose name, summary, category, tags, theme or a slide title matches `query`,
+/// in `category` (`All` or `Favourites`), at most `limit` tiles. Each tile is the deck's first
+/// slide as it will open, rendered once; the star marks a favourite.
+fn template_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize, category: &str, opts: &TemplateOptions) -> bool {
+    let favourites = app.ui.favourite_templates.clone();
+    let mut list = deckcraft_engine::templates::matching(query);
+    if category.eq_ignore_ascii_case("favourites") {
+        list.retain(|t| favourites.iter().any(|f| f == t.name));
+    } else if !category.eq_ignore_ascii_case("all") && !category.is_empty() {
+        list.retain(|t| t.category.eq_ignore_ascii_case(category));
+    }
     if list.is_empty() {
         return false;
     }
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
         for starter in list.into_iter().take(limit) {
-            let theme = deckcraft_model::theme::builtin_themes().into_iter().find(|th| th.name == starter.theme);
-            if tile(ui, starter.name, theme.as_ref(), false).on_hover_text(starter.summary).clicked() {
-                let _ = app.run("file.new", json!({"template": starter.name}));
-            }
+            template_tile(app, ui, starter, opts);
         }
     });
     true
+}
+
+/// One template tile: the first slide, the deck's name and category, and a favourite star.
+fn template_tile(app: &mut SlideApp, ui: &mut Ui, starter: &'static deckcraft_engine::templates::Starter, opts: &TemplateOptions) {
+    let t = Tokens::get(ui.ctx());
+    let thumb_w = 210.0;
+    let thumb_h = thumb_w * 9.0 / 16.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(thumb_w + 12.0, thumb_h + 56.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, starter.name));
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, CornerRadius::same(4), t.hover);
+    }
+    let thumb = Rect::from_min_size(rect.min + vec2(6.0, 6.0), vec2(thumb_w, thumb_h));
+    let mut budget = 4;
+    let px = (thumb_w * ui.ctx().pixels_per_point()).round().clamp(32.0, 640.0) as u32;
+    match app.textures.template_thumb(ui.ctx(), starter, px, &mut budget) {
+        Some(tex) => {
+            ui.painter().image(tex.id(), thumb, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        None => {
+            ui.painter().rect_filled(thumb, CornerRadius::same(2), t.field_bg);
+            ui.ctx().request_repaint();
+        }
+    }
+    ui.painter().rect_stroke(thumb, CornerRadius::same(2), Stroke::new(1.0, t.border), StrokeKind::Inside);
+    if resp.hovered() {
+        ui.painter().rect_stroke(thumb, CornerRadius::same(2), Stroke::new(2.0, t.accent), StrokeKind::Outside);
+    }
+    let favourite = app.ui.favourite_templates.iter().any(|f| f == starter.name);
+    let star_rect = Rect::from_center_size(thumb.right_top() + vec2(-16.0, 16.0), vec2(26.0, 26.0));
+    let star = ui.interact(star_rect, ui.make_persistent_id(("template-star", starter.name)), Sense::click());
+    ui.painter().circle_filled(star_rect.center(), 11.0, t.card.gamma_multiply(0.9));
+    ui.painter().text(
+        star_rect.center(),
+        Align2::CENTER_CENTER,
+        if favourite { "★" } else { "☆" },
+        theme::font(15.0),
+        if favourite { t.accent } else { t.text_dim },
+    );
+    if star.on_hover_text(if favourite { "Remove from favourites" } else { "Add to favourites" }).clicked() {
+        if favourite {
+            app.ui.favourite_templates.retain(|f| f != starter.name);
+        } else {
+            app.ui.favourite_templates.push(starter.name.to_string());
+        }
+        return;
+    }
+    let p = ui.painter();
+    let name = p.layout(starter.name.to_string(), theme::bold(12.5), t.text, thumb_w);
+    p.galley(pos2(rect.left() + 8.0, thumb.bottom() + 7.0), name, t.text);
+    p.text(pos2(rect.left() + 8.0, thumb.bottom() + 30.0), Align2::LEFT_TOP, starter.category, theme::font(10.5), t.text_dim);
+    if resp.on_hover_text(starter.summary).clicked() {
+        let _ = app.run("file.new", opts.params(starter.name));
+    }
+}
+
+/// Read the user's templates once per visit (File › New, or after Save as Template).
+fn load_user_templates(app: &mut SlideApp, bs: &mut Backstage) {
+    if bs.user_templates_loaded {
+        return;
+    }
+    bs.user_templates_loaded = true;
+    bs.user_templates.clear();
+    let Ok(v) = app.session.execute("file.templates", &json!({})) else { return };
+    for t in v.get("templates").and_then(Value::as_array).into_iter().flatten() {
+        if !t.get("user").and_then(Value::as_bool).unwrap_or(false) {
+            continue;
+        }
+        let Some(path) = t.get("path").and_then(Value::as_str) else { continue };
+        bs.user_templates.push(UserTemplateEntry {
+            name: t.get("name").and_then(Value::as_str).unwrap_or("Template").to_string(),
+            path: std::path::PathBuf::from(path),
+            theme: t.get("theme").and_then(Value::as_str).unwrap_or("").to_string(),
+            slides: t.get("slides").and_then(Value::as_u64).unwrap_or(0) as usize,
+        });
+    }
+}
+
+/// The user's templates matching `query`, category and the favourites filter.
+fn user_template_tiles(app: &mut SlideApp, ui: &mut Ui, bs: &Backstage, query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    let favourites = &app.ui.favourite_templates;
+    let category = bs.template_category.as_str();
+    let list: Vec<&UserTemplateEntry> = bs
+        .user_templates
+        .iter()
+        .filter(|t| {
+            (category.eq_ignore_ascii_case("all") || category.eq_ignore_ascii_case("yours") || category.eq_ignore_ascii_case("favourites"))
+                && (q.is_empty() || t.name.to_lowercase().contains(&q) || t.theme.to_lowercase().contains(&q))
+                && (!category.eq_ignore_ascii_case("favourites") || favourites.contains(&t.name))
+        })
+        .collect();
+    if list.is_empty() {
+        return false;
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
+        for entry in list {
+            user_template_tile(app, ui, entry, &bs.template_options);
+        }
+    });
+    true
+}
+
+fn user_template_tile(app: &mut SlideApp, ui: &mut Ui, entry: &UserTemplateEntry, opts: &TemplateOptions) {
+    let t = Tokens::get(ui.ctx());
+    let thumb_w = 210.0;
+    let thumb_h = thumb_w * 9.0 / 16.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(thumb_w + 12.0, thumb_h + 56.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &entry.name));
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, CornerRadius::same(4), t.hover);
+    }
+    let thumb = Rect::from_min_size(rect.min + vec2(6.0, 6.0), vec2(thumb_w, thumb_h));
+    let mut budget = 4;
+    let px = (thumb_w * ui.ctx().pixels_per_point()).round().clamp(32.0, 640.0) as u32;
+    #[cfg(not(target_arch = "wasm32"))]
+    let tex = app.textures.user_template_thumb(ui.ctx(), &entry.path, px, &mut budget);
+    #[cfg(target_arch = "wasm32")]
+    let tex: Option<egui::TextureHandle> = None;
+    match tex {
+        Some(tex) => {
+            ui.painter().image(tex.id(), thumb, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        None => {
+            ui.painter().rect_filled(thumb, CornerRadius::same(2), t.field_bg);
+            ui.ctx().request_repaint();
+        }
+    }
+    ui.painter().rect_stroke(thumb, CornerRadius::same(2), Stroke::new(1.0, t.border), StrokeKind::Inside);
+    if resp.hovered() {
+        ui.painter().rect_stroke(thumb, CornerRadius::same(2), Stroke::new(2.0, t.accent), StrokeKind::Outside);
+    }
+    let p = ui.painter();
+    let name = p.layout(entry.name.clone(), theme::bold(12.5), t.text, thumb_w);
+    p.galley(pos2(rect.left() + 8.0, thumb.bottom() + 7.0), name, t.text);
+    let detail = format!("Yours · {} slide{}", entry.slides, if entry.slides == 1 { "" } else { "s" });
+    p.text(pos2(rect.left() + 8.0, thumb.bottom() + 30.0), Align2::LEFT_TOP, detail, theme::font(10.5), t.text_dim);
+    if resp.on_hover_text(entry.path.display().to_string()).clicked() {
+        let _ = app.run("file.new", opts.params(&entry.name));
+    }
 }
 
 /// File name and folder of a recent path, split as text (nothing on disk is read).
@@ -718,7 +998,7 @@ fn home(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcome) 
         });
     });
     ui.add_space(6.0);
-    template_tiles(app, ui, "", 3);
+    template_tiles(app, ui, "", 3, "All", &bs.template_options);
     ui.add_space(22.0);
     ui.horizontal(|ui| {
         ui.label(RichText::new("Recent").font(theme::bold(16.0)).color(t.text));
@@ -751,19 +1031,73 @@ fn new_page(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     let (r, _) = ui.allocate_exact_size(vec2(w, 1.0), Sense::hover());
     ui.painter().line_segment([r.left_center(), r.right_center()], Stroke::new(1.0, t.separator));
     ui.add_space(14.0);
-    search(ui, &mut bs.query, "Search for themes and templates", 380.0);
-    ui.add_space(14.0);
+    search(ui, &mut bs.query, "Search templates, themes and tags", 380.0);
+    ui.add_space(12.0);
     let q = bs.query.clone();
+    load_user_templates(app, bs);
+    let categories = deckcraft_engine::templates::categories();
+    let favourites = app.ui.favourite_templates.len();
+    let user_count = bs.user_templates.len();
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        let chip = |ui: &mut Ui, label: &str, selected: bool| -> bool {
+            let text = RichText::new(label).font(theme::font(12.0)).color(if selected { t.accent_text } else { t.text });
+            ui.add(egui::Button::new(text).fill(if selected { t.accent } else { t.field_bg }).stroke(Stroke::new(1.0, t.border))).clicked()
+        };
+        if chip(ui, "All", bs.template_category == "All") {
+            bs.template_category = "All".into();
+        }
+        if chip(ui, &format!("Favourites ({favourites})"), bs.template_category == "Favourites") {
+            bs.template_category = "Favourites".into();
+        }
+        for (name, count) in &categories {
+            if chip(ui, &format!("{name} ({count})"), bs.template_category.eq_ignore_ascii_case(name)) {
+                bs.template_category = (*name).to_string();
+            }
+        }
+        if user_count > 0 && chip(ui, &format!("Yours ({user_count})"), bs.template_category == "Yours") {
+            bs.template_category = "Yours".into();
+        }
+    });
+    ui.add_space(14.0);
+    heading(ui, "Template options");
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
+        ui.label("Theme:");
+        let current = if bs.template_options.theme.is_empty() { "Template's own".to_string() } else { bs.template_options.theme.clone() };
+        egui::ComboBox::from_id_salt("new_template_theme").width(160.0).selected_text(current).show_ui(ui, |ui| {
+            if ui.selectable_label(bs.template_options.theme.is_empty(), "Template's own").clicked() {
+                bs.template_options.theme.clear();
+            }
+            for th in deckcraft_model::theme::builtin_themes() {
+                if ui.selectable_label(bs.template_options.theme == th.name, &th.name).clicked() {
+                    bs.template_options.theme = th.name.clone();
+                }
+            }
+        });
+        ui.checkbox(&mut bs.template_options.dark, "Dark variant");
+        let major = ui.add(egui::TextEdit::singleline(&mut bs.template_options.major).hint_text("Heading font").desired_width(130.0));
+        major.on_hover_text("Latin heading typeface; leave blank for the theme's");
+        let minor = ui.add(egui::TextEdit::singleline(&mut bs.template_options.minor).hint_text("Body font").desired_width(130.0));
+        minor.on_hover_text("Latin body typeface; leave blank for the theme's");
+    });
+    dim(ui, "These apply to the template you choose below. The dark variant is generated from the theme's colours.");
+    ui.add_space(14.0);
+    heading(ui, "Templates");
+    let templates = template_tiles(app, ui, &q, usize::MAX, &bs.template_category, &bs.template_options);
+    let user = user_template_tiles(app, ui, bs, &q);
+    if !templates && !user {
+        if bs.template_category.eq_ignore_ascii_case("favourites") && favourites == 0 {
+            dim(ui, "No favourites yet: press the star on a template to keep it here.");
+        } else {
+            dim(ui, &format!("No templates match “{}” in this category.", q.trim()));
+        }
+    }
+    ui.add_space(18.0);
+    heading(ui, "Themes");
     let themes = new_tiles(app, ui, &q, usize::MAX, false);
-    let templates = if q.trim().is_empty() || !deckcraft_engine::templates::matching(&q).is_empty() {
-        ui.add_space(18.0);
-        heading(ui, "Templates");
-        template_tiles(app, ui, &q, usize::MAX)
-    } else {
-        false
-    };
-    if !themes && !templates {
-        dim(ui, &format!("No themes or templates match “{}”.", q.trim()));
+    if !themes && templates {
+        dim(ui, &format!("No themes match “{}”.", q.trim()));
     }
 }
 
@@ -932,26 +1266,32 @@ fn save_as(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcom
     ui.label(RichText::new(&title).font(theme::font(15.0)).color(t.text));
     dim(ui, path.as_deref().unwrap_or("Not saved yet"));
     ui.add_space(14.0);
-    let current = SAVE_TYPES.iter().find(|s| s.0 == bs.file_type).map_or(SAVE_TYPES[0].1, |s| s.1);
+    let types = save_types();
+    let current = types.iter().find(|s| s.0 == bs.file_type).map_or("PowerPoint Presentation (*.pptx)", |s| s.1.as_str());
+    let web = app.services.pick_save.is_none();
+    let spec = deckcraft_engine::formats::by_id(bs.file_type);
+    let desktop_only = spec.is_some_and(|f| f.availability == deckcraft_engine::formats::Availability::Desktop);
     ui.horizontal(|ui| {
         egui::ComboBox::from_id_salt("backstage_save_type").width(340.0).selected_text(current).show_ui(ui, |ui| {
-            for (id, label, _) in SAVE_TYPES {
-                if ui.selectable_label(bs.file_type == id, label).clicked() {
+            for (id, label, _) in &types {
+                if ui.selectable_label(bs.file_type == *id, label).clicked() {
                     bs.file_type = id;
                 }
             }
         });
-        let web = app.services.pick_save.is_none();
+        let enabled = !(web && desktop_only);
         let label = if web { "Download" } else { "Save" };
-        let save = ui.add(egui::Button::new(RichText::new(label).color(t.accent_text)).fill(t.accent).min_size(vec2(84.0, 26.0)));
+        let save = ui.add_enabled(enabled, egui::Button::new(RichText::new(label).color(t.accent_text)).fill(t.accent).min_size(vec2(84.0, 26.0)));
         if save.on_hover_text(if web { "Download the file" } else { "Choose where to save" }).clicked() {
             let fmt = bs.file_type;
-            let done = if matches!(fmt, "pptx" | "deckcraft") {
+            let editable = spec.is_some_and(|f| f.kind == deckcraft_engine::formats::FormatKind::Editable);
+            let done = if editable {
                 let before = app.session.active().map(|d| (d.path.clone(), d.is_dirty()));
                 app.save_as_dialog(fmt);
-                web || app.session.active().map(|d| (d.path.clone(), d.is_dirty())) != before
+                let after = app.session.active().map(|d| (d.path.clone(), d.is_dirty()));
+                web || after != before || app.session.active().is_some_and(|d| !d.is_dirty())
             } else {
-                app.export_as(fmt, json!({}))
+                app.export_as(fmt, export_extra(bs, fmt))
             };
             if done {
                 out.close = true;
@@ -959,8 +1299,73 @@ fn save_as(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcom
         }
     });
     ui.add_space(8.0);
-    if let Some((_, _, detail)) = SAVE_TYPES.iter().find(|s| s.0 == bs.file_type) {
-        dim(ui, detail);
+    if let Some(spec) = spec {
+        dim(ui, spec.description);
+        if !spec.limitations.is_empty() {
+            ui.add_space(4.0);
+            for limitation in spec.limitations {
+                ui.label(RichText::new(format!("•  {limitation}")).font(theme::font(11.5)).color(t.text_dim));
+            }
+        }
+        if web && desktop_only {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("This format needs the desktop app: the browser can't run the encoder or write the file.")
+                    .font(theme::font(12.0))
+                    .color(t.accent),
+            );
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if app.session.template_dir.is_some() {
+        ui.add_space(18.0);
+        if ui.button("Save a copy as a template").on_hover_text("Adds this presentation to File › New, under Yours").clicked() {
+            match app.session.execute("file.saveTemplate", &json!({})) {
+                Ok(v) => {
+                    let name = v.get("name").and_then(Value::as_str).unwrap_or("Template");
+                    app.set_status(format!("Saved “{name}” to your templates"));
+                    bs.user_templates_loaded = false;
+                }
+                Err(e) => app.set_status(e.to_string()),
+            }
+        }
+    }
+}
+
+/// The `file.export` params the Export and Save As pages add for `id`: the options each format
+/// takes, from the page's settings.
+pub fn export_extra(bs: &Backstage, id: &str) -> Value {
+    match id {
+        "png" => json!({
+            "all": bs.png_all,
+            "scale": bs.image_scale,
+            "transparentBackground": bs.png_transparent,
+        }),
+        "webp" => json!({
+            "all": bs.png_all,
+            "scale": bs.image_scale,
+            "transparentBackground": bs.png_transparent,
+        }),
+        "jpeg" => json!({"all": bs.png_all, "scale": bs.image_scale}),
+        "pdf" => json!({"includeHidden": bs.pdf_hidden, "dpi": bs.pdf_dpi, "textLayer": bs.pdf_text_layer, "color": bs.print_color}),
+        "gif" => json!({
+            "width": bs.gif_width,
+            "secondsPerSlide": bs.gif_seconds,
+            "loop": bs.gif_loop,
+            "includeHidden": bs.gif_hidden,
+        }),
+        "mp4" | "webm" => json!({
+            "width": bs.video_width,
+            "fps": bs.video_fps,
+            "secondsPerSlide": bs.video_seconds,
+            "useTimings": bs.video_timings,
+            "transitions": bs.video_transitions,
+            "animations": bs.video_animations,
+            "audio": bs.video_audio,
+            "quality": bs.video_quality,
+            "includeHidden": bs.video_hidden,
+        }),
+        _ => json!({}),
     }
 }
 
@@ -999,12 +1404,20 @@ pub fn print_params(bs: &Backstage, slides: &[usize]) -> Value {
         "frame": bs.print_frame,
         "paper": bs.print_paper,
         "orientation": if bs.print_landscape { "landscape" } else { "portrait" },
+        "color": bs.print_color,
+        "margin": bs.print_margin.clamp(0.0, 216.0),
+        "scale": bs.print_scale.clamp(10.0, 200.0),
+        "header": bs.print_header.trim(),
+        "footer": bs.print_footer.trim(),
+        "pageNumbers": bs.print_numbers,
+        "direct": bs.print_direct,
+        "fitPaper": bs.print_layout == "slides" && bs.print_fit_paper,
     })
 }
 
 /// The printed page size in points: the slide size for full-page slides, else the chosen paper.
 pub fn print_page_size(bs: &Backstage, doc: &deckcraft_model::Presentation) -> (f32, f32) {
-    if bs.print_layout == "slides" {
+    if bs.print_layout == "slides" && !bs.print_fit_paper {
         return (doc.slide_size.width as f32, doc.slide_size.height as f32);
     }
     let (w, h) = deckcraft_engine::cmd::file::paper_size(bs.print_paper, bs.print_landscape).unwrap_or((612.0, 792.0));
@@ -1086,9 +1499,12 @@ fn print(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                 }
             });
             ui.add_space(4.0);
-            // PowerPoint prints full-page slides on slide-shaped pages; paper and orientation are
-            // for notes pages and handouts.
-            ui.add_enabled_ui(bs.print_layout != "slides", |ui| {
+            if bs.print_layout == "slides" && ui.checkbox(&mut bs.print_fit_paper, "Fit Slide to Paper").changed() {
+                bs.preview_page = 0;
+            }
+            // PowerPoint prints full-page slides on slide-shaped pages by default; paper and
+            // orientation are for notes pages, handouts, and slides explicitly fitted to paper.
+            ui.add_enabled_ui(bs.print_layout != "slides" || bs.print_fit_paper, |ui| {
                 let paper = deckcraft_engine::cmd::file::PAPERS.iter().find(|p| p.0 == bs.print_paper).map_or("Letter", |p| p.1);
                 egui::ComboBox::from_id_salt("backstage_print_paper").width(240.0).selected_text(paper).show_ui(ui, |ui| {
                     for (id, label, _) in deckcraft_engine::cmd::file::PAPERS {
@@ -1108,12 +1524,49 @@ fn print(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                 });
             });
             ui.add_space(4.0);
+            let colour = match bs.print_color {
+                "grayscale" => "Grayscale",
+                "blackAndWhite" => "Black and White",
+                _ => "Color",
+            };
+            egui::ComboBox::from_id_salt("backstage_print_color").width(240.0).selected_text(colour).show_ui(ui, |ui| {
+                for (id, label) in [("color", "Color"), ("grayscale", "Grayscale"), ("blackAndWhite", "Black and White")] {
+                    if ui.selectable_label(bs.print_color == id, label).clicked() {
+                        bs.print_color = id;
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Margin:");
+                if ui.add(egui::DragValue::new(&mut bs.print_margin).suffix(" pt").max_decimals(0)).changed() {
+                    bs.print_margin = bs.print_margin.clamp(0.0, 216.0);
+                    bs.preview_page = 0;
+                }
+                ui.label("Scale:");
+                if ui.add(egui::DragValue::new(&mut bs.print_scale).suffix("%").max_decimals(0)).changed() {
+                    bs.print_scale = bs.print_scale.clamp(10.0, 200.0);
+                    bs.preview_page = 0;
+                }
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let l = ui.label("Header:");
+                ui.add(egui::TextEdit::singleline(&mut bs.print_header).hint_text("optional").desired_width(176.0)).labelled_by(l.id);
+            });
+            ui.horizontal(|ui| {
+                let l = ui.label("Footer:");
+                ui.add(egui::TextEdit::singleline(&mut bs.print_footer).hint_text("optional").desired_width(176.0)).labelled_by(l.id);
+            });
+            ui.checkbox(&mut bs.print_numbers, "Page Numbers");
+            ui.add_space(4.0);
+            ui.checkbox(&mut bs.print_direct, "Send Directly to Printer (lp)");
             if ui.checkbox(&mut bs.print_hidden, "Print Hidden Slides").changed() {
                 bs.preview_page = 0;
             }
             ui.checkbox(&mut bs.print_frame, "Frame Slides");
             ui.add_space(6.0);
-            if ui.link("Edit Header & Footer").clicked() {
+            if ui.link("Document Header & Footer…").clicked() {
                 let _ = app.run("app.dialog", json!({"id": "headerFooter"}));
             }
         });
@@ -1151,6 +1604,10 @@ fn preview(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, doc: &deckcraft_
     p.rect_filled(page.translate(vec2(2.0, 3.0)), 0.0, t.shadow);
     p.rect_filled(page, 0.0, Color32::WHITE);
     let aspect = (doc.slide_size.height / doc.slide_size.width.max(1.0)) as f32;
+    // Preview the same margin, scale and header/footer the PDF gets.
+    let margin = (bs.print_margin * scale).clamp(0.0, page.width().min(page.height()) * 0.4);
+    let zoom = (bs.print_scale / 100.0).clamp(0.1, 2.0);
+    let scaled = |r: Rect| if (zoom - 1.0).abs() < f32::EPSILON { r } else { Rect::from_center_size(r.center(), r.size() * zoom) };
     let mut budget = 4u32;
     let mut draw_slide = |ui: &mut Ui, i: usize, r: Rect| {
         let px = (r.width() * ui.ctx().pixels_per_point()).round().clamp(16.0, 1600.0) as u32;
@@ -1167,20 +1624,26 @@ fn preview(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, doc: &deckcraft_
     match bs.print_layout {
         "slides" => {
             if let Some(i) = on_page.first() {
-                draw_slide(ui, *i, page);
+                let r = if bs.print_fit_paper {
+                    let inner = page.shrink(margin);
+                    let w = inner.width().min(inner.height() / aspect.max(0.01));
+                    scaled(Rect::from_center_size(inner.center(), vec2(w, w * aspect)))
+                } else {
+                    scaled(page)
+                };
+                draw_slide(ui, *i, r);
             }
         }
         "notes" => {
             if let Some(i) = on_page.first() {
-                let w = page.width() * 0.75;
-                let r = Rect::from_min_size(pos2(page.center().x - w / 2.0, page.top() + page.height() * 0.08), vec2(w, w * aspect));
+                let inner = page.shrink(margin);
+                let w = inner.width() * 0.75;
+                let r = scaled(Rect::from_min_size(pos2(inner.center().x - w / 2.0, inner.top()), vec2(w, w * aspect)));
                 draw_slide(ui, *i, r);
                 let notes = doc.slides.get(*i).map(|s| s.notes_text()).unwrap_or_default();
                 let font = theme::font((11.0 * scale).clamp(5.0, 13.0));
-                let text_rect = Rect::from_min_max(
-                    pos2(page.left() + page.width() * 0.12, r.bottom() + 20.0 * scale),
-                    page.max - vec2(page.width() * 0.12, 30.0 * scale),
-                );
+                let text_rect =
+                    Rect::from_min_max(pos2(inner.left(), r.bottom() + 20.0 * scale), pos2(inner.right(), page.bottom() - margin.max(12.0 * scale)));
                 let galley = ui.painter().layout(notes, font, Color32::from_gray(30), text_rect.width());
                 ui.painter().with_clip_rect(text_rect).galley(text_rect.min, galley, Color32::from_gray(30));
             }
@@ -1195,7 +1658,7 @@ fn preview(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, doc: &deckcraft_
                 6 => (2, 3),
                 _ => (3, 3),
             };
-            let inner = page.shrink2(vec2(page.width() * 0.08, page.height() * 0.07));
+            let inner = page.shrink(margin);
             // Three a page leaves lines for notes beside each slide, as PowerPoint's handouts do.
             let slide_area = if n == 3 { Rect::from_min_size(inner.min, vec2(inner.width() * 0.5, inner.height())) } else { inner };
             let cell = vec2(slide_area.width() / cols as f32, slide_area.height() / rows as f32);
@@ -1203,7 +1666,7 @@ fn preview(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, doc: &deckcraft_
                 let (c, r) = ((k % cols) as f32, (k / cols) as f32);
                 let cell_rect = Rect::from_min_size(slide_area.min + vec2(c * cell.x, r * cell.y), cell).shrink(cell.x.min(cell.y) * 0.08);
                 let w = cell_rect.width().min(cell_rect.height() / aspect.max(0.01));
-                let sr = Rect::from_center_size(cell_rect.center(), vec2(w, w * aspect));
+                let sr = scaled(Rect::from_center_size(cell_rect.center(), vec2(w, w * aspect)));
                 draw_slide(ui, *i, sr);
                 if n == 3 {
                     for line in 1..=5 {
@@ -1214,6 +1677,34 @@ fn preview(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, doc: &deckcraft_
                 }
             }
         }
+    }
+    let text_font = theme::font((8.0 * scale).clamp(6.0, 10.0));
+    if !bs.print_header.trim().is_empty() {
+        ui.painter().text(
+            pos2(page.left() + margin, page.top() + margin * 0.5),
+            Align2::LEFT_TOP,
+            bs.print_header.trim(),
+            text_font.clone(),
+            Color32::from_gray(90),
+        );
+    }
+    if !bs.print_footer.trim().is_empty() {
+        ui.painter().text(
+            pos2(page.left() + margin, page.bottom() - margin.max(12.0 * scale)),
+            Align2::LEFT_BOTTOM,
+            bs.print_footer.trim(),
+            text_font.clone(),
+            Color32::from_gray(90),
+        );
+    }
+    if bs.print_numbers {
+        ui.painter().text(
+            pos2(page.right() - margin, page.bottom() - margin.max(12.0 * scale)),
+            Align2::RIGHT_BOTTOM,
+            (bs.preview_page + 1).to_string(),
+            text_font,
+            Color32::from_gray(90),
+        );
     }
     ui.add_space(6.0);
     ui.horizontal(|ui| {
@@ -1239,9 +1730,8 @@ fn icon_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool) -> bool {
     resp.on_hover_text(label).clicked()
 }
 
-/// Export: tasks on the left (Create PDF Document, Create Handouts, Change File Type), the chosen
-/// one's description and button on the right. PowerPoint's video, animated GIF and CD package
-/// exports aren't offered.
+/// Export: tasks on the left (Create PDF Document, Create Handouts, Create a Video, Animated GIF,
+/// Change File Type), the chosen one's description and options on the right.
 fn export(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal_top(|ui| {
@@ -1250,6 +1740,8 @@ fn export(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
             for (task, icon, label) in [
                 (ExportTask::Pdf, Icon::File, "Create PDF Document"),
                 (ExportTask::Handouts, Icon::Notes, "Create Handouts"),
+                (ExportTask::Video, Icon::Video, "Create a Video"),
+                (ExportTask::Gif, Icon::Image, "Animated GIF"),
                 (ExportTask::FileType, Icon::Export, "Change File Type"),
             ] {
                 if place_row(ui, icon, label, bs.export == task, 244.0).clicked() {
@@ -1257,11 +1749,11 @@ fn export(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                 }
             }
         });
-        let (r, _) = ui.allocate_exact_size(vec2(1.0, 420.0), Sense::hover());
+        let (r, _) = ui.allocate_exact_size(vec2(1.0, 480.0), Sense::hover());
         ui.painter().line_segment([r.center_top(), r.center_bottom()], Stroke::new(1.0, t.separator));
         ui.add_space(24.0);
         ui.vertical(|ui| {
-            ui.set_max_width(560.0);
+            ui.set_max_width(600.0);
             match bs.export {
                 ExportTask::Pdf => {
                     ui.label(RichText::new("Create a PDF Document").font(theme::font(16.0)).color(t.text));
@@ -1270,9 +1762,49 @@ fn export(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                         &["Keeps the layout, fonts and pictures", "Opens on any device with a PDF viewer", "The presentation keeps its own file"],
                     );
                     ui.checkbox(&mut bs.pdf_hidden, "Include hidden slides");
+                    ui.checkbox(&mut bs.pdf_text_layer, "Keep text selectable and searchable")
+                        .on_hover_text("Adds an invisible text layer over the slide artwork");
+                    ui.horizontal(|ui| {
+                        ui.label("Colour:");
+                        egui::ComboBox::from_id_salt("backstage_pdf_color")
+                            .width(160.0)
+                            .selected_text(match bs.print_color {
+                                "grayscale" => "Grayscale",
+                                "blackAndWhite" => "Black and White",
+                                _ => "Color",
+                            })
+                            .show_ui(ui, |ui| {
+                                for (id, label) in [("color", "Color"), ("grayscale", "Grayscale"), ("blackAndWhite", "Black and White")] {
+                                    if ui.selectable_label(bs.print_color == id, label).clicked() {
+                                        bs.print_color = id;
+                                    }
+                                }
+                            });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Quality:");
+                        egui::ComboBox::from_id_salt("backstage_pdf_dpi")
+                            .width(180.0)
+                            .selected_text(match bs.pdf_dpi as u32 {
+                                0..=119 => "Draft (100 dpi)",
+                                120..=179 => "Standard (150 dpi)",
+                                180..=239 => "Good (200 dpi)",
+                                240..=359 => "High (300 dpi)",
+                                _ => "Print (600 dpi)",
+                            })
+                            .show_ui(ui, |ui| {
+                                for (dpi, label) in
+                                    [(100.0, "Draft (100 dpi)"), (150.0, "Standard (150 dpi)"), (200.0, "Good (200 dpi)"), (300.0, "High (300 dpi)"), (600.0, "Print (600 dpi)")]
+                                {
+                                    if ui.selectable_label((bs.pdf_dpi - dpi).abs() < 1.0, label).clicked() {
+                                        bs.pdf_dpi = dpi;
+                                    }
+                                }
+                            });
+                    });
                     ui.add_space(10.0);
                     if square_button(ui, Icon::File, "Create PDF", true).clicked() {
-                        app.export_as("pdf", json!({"includeHidden": bs.pdf_hidden}));
+                        app.export_as("pdf", export_extra(bs, "pdf"));
                     }
                 }
                 ExportTask::Handouts => {
@@ -1293,40 +1825,234 @@ fn export(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                         app.export_as("pdf", json!({"layout": "handouts", "perPage": bs.handouts_per_page}));
                     }
                 }
+                ExportTask::Video => {
+                    ui.label(RichText::new("Create a Video").font(theme::font(16.0)).color(t.text));
+                    bullets(
+                        ui,
+                        &[
+                            "Slides, transitions and build animations as they play",
+                            "Recorded slide timings, or a fixed time per slide",
+                            "Audio from autoplay media is mixed in",
+                        ],
+                    );
+                    let ready = video_ready();
+                    if !ready {
+                        ui.label(
+                            RichText::new(
+                                "Video export needs the desktop app and ffmpeg with libx264 or libvpx-vp9 on PATH (or DECKCRAFT_FFMPEG). Animated GIF and PDF export work without it.",
+                            )
+                            .font(theme::font(12.0))
+                            .color(t.accent),
+                        );
+                        ui.add_space(6.0);
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label("Format:");
+                        egui::ComboBox::from_id_salt("backstage_video_format")
+                            .width(150.0)
+                            .selected_text(if bs.video_format == "webm" { "WebM (VP9)" } else { "MP4 (H.264)" })
+                            .show_ui(ui, |ui| {
+                                for (id, label) in [("mp4", "MP4 (H.264)"), ("webm", "WebM (VP9)")] {
+                                    if ui.selectable_label(bs.video_format == id, label).clicked() {
+                                        bs.video_format = id;
+                                    }
+                                }
+                            });
+                        ui.label("Size:");
+                        egui::ComboBox::from_id_salt("backstage_video_size")
+                            .width(150.0)
+                            .selected_text(match bs.video_width {
+                                1280 => "720p",
+                                3840 => "4K (2160p)",
+                                _ => "1080p",
+                            })
+                            .show_ui(ui, |ui| {
+                                for (width, label) in [(1280u32, "720p"), (1920, "1080p"), (3840, "4K (2160p)")] {
+                                    if ui.selectable_label(bs.video_width == width, label).clicked() {
+                                        bs.video_width = width;
+                                    }
+                                }
+                            });
+                        ui.label("Rate:");
+                        egui::ComboBox::from_id_salt("backstage_video_fps")
+                            .width(96.0)
+                            .selected_text(format!("{} fps", bs.video_fps))
+                            .show_ui(ui, |ui| {
+                                for fps in [24u32, 30, 60] {
+                                    if ui.selectable_label(bs.video_fps == fps, format!("{fps} fps")).clicked() {
+                                        bs.video_fps = fps;
+                                    }
+                                }
+                            });
+                    });
+                    ui.add_space(6.0);
+                    ui.checkbox(&mut bs.video_timings, "Use recorded slide timings")
+                        .on_hover_text("Times from Slide Show › Rehearse Timings; off means the seconds below for every slide");
+                    ui.add_enabled_ui(!bs.video_timings, |ui| {
+                        ui.add(egui::Slider::new(&mut bs.video_seconds, 0.5..=60.0).text("Seconds per slide").step_by(0.5));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut bs.video_transitions, "Transitions");
+                        ui.checkbox(&mut bs.video_animations, "Animations");
+                        ui.checkbox(&mut bs.video_audio, "Audio");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut bs.video_hidden, "Include hidden slides");
+                        ui.label("Quality:");
+                        egui::ComboBox::from_id_salt("backstage_video_quality")
+                            .width(120.0)
+                            .selected_text(match bs.video_quality {
+                                0..=39 => "Small file",
+                                40..=69 => "Balanced",
+                                70..=89 => "High",
+                                _ => "Best",
+                            })
+                            .show_ui(ui, |ui| {
+                                for (q, label) in [(25u8, "Small file"), (60, "Balanced"), (80, "High"), (95, "Best")] {
+                                    if ui.selectable_label(bs.video_quality == q, label).clicked() {
+                                        bs.video_quality = q;
+                                    }
+                                }
+                            });
+                    });
+                    ui.add_space(10.0);
+                    if square_button(ui, Icon::Video, "Create Video", ready).clicked() {
+                        app.export_as(bs.video_format, export_extra(bs, bs.video_format));
+                    }
+                }
+                ExportTask::Gif => {
+                    ui.label(RichText::new("Animated GIF").font(theme::font(16.0)).color(t.text));
+                    bullets(ui, &["One frame per slide, looping in any browser", "No player or codec needed", "Transitions are not animated"]);
+                    ui.horizontal(|ui| {
+                        ui.label("Width:");
+                        egui::ComboBox::from_id_salt("backstage_gif_width")
+                            .width(140.0)
+                            .selected_text(format!("{} px", bs.gif_width))
+                            .show_ui(ui, |ui| {
+                                for width in [480u32, 640, 960, 1280] {
+                                    if ui.selectable_label(bs.gif_width == width, format!("{width} px")).clicked() {
+                                        bs.gif_width = width;
+                                    }
+                                }
+                            });
+                        ui.checkbox(&mut bs.gif_loop, "Loop");
+                    });
+                    ui.add(egui::Slider::new(&mut bs.gif_seconds, 0.5..=20.0).text("Seconds per slide").step_by(0.5));
+                    ui.checkbox(&mut bs.gif_hidden, "Include hidden slides");
+                    ui.add_space(10.0);
+                    if square_button(ui, Icon::Image, "Create GIF", true).clicked() {
+                        app.export_as("gif", export_extra(bs, "gif"));
+                    }
+                }
                 ExportTask::FileType => {
                     ui.label(RichText::new("Change File Type").font(theme::font(16.0)).color(t.text));
                     ui.add_space(8.0);
-                    for (id, label, detail) in SAVE_TYPES.iter().filter(|s| s.0 != "pdf") {
-                        let selected = bs.file_type == *id;
+                    for (id, label, detail) in save_types().into_iter().filter(|s| s.0 != "pdf") {
+                        let selected = bs.file_type == id;
                         let (rect, resp) = ui.allocate_exact_size(vec2(520.0, 46.0), Sense::click());
-                        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, *label));
+                        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &label));
                         let p = ui.painter();
                         if selected {
                             p.rect_filled(rect, CornerRadius::same(2), t.selected);
                         } else if resp.hovered() {
                             p.rect_filled(rect, CornerRadius::same(2), t.hover);
                         }
-                        p.text(pos2(rect.left() + 12.0, rect.center().y - 8.0), Align2::LEFT_CENTER, *label, theme::font(13.0), t.text);
-                        p.text(pos2(rect.left() + 12.0, rect.center().y + 9.0), Align2::LEFT_CENTER, *detail, theme::font(11.5), t.text_dim);
+                        p.text(pos2(rect.left() + 12.0, rect.center().y - 8.0), Align2::LEFT_CENTER, &label, theme::font(13.0), t.text);
+                        p.text(pos2(rect.left() + 12.0, rect.center().y + 9.0), Align2::LEFT_CENTER, detail, theme::font(11.5), t.text_dim);
                         if resp.clicked() {
                             bs.file_type = id;
                         }
                     }
-                    ui.add_space(12.0);
-                    let png = bs.file_type == "png";
-                    if png {
+                    ui.add_space(8.0);
+                    if bs.file_type == "png" || bs.file_type == "webp" {
                         ui.checkbox(&mut bs.png_transparent, "Transparent background")
                             .on_hover_text("Leave the slide background out: only what is on the slide is drawn");
-                        ui.add_space(8.0);
                     }
+                    if matches!(bs.file_type, "png" | "jpeg" | "webp") {
+                        ui.checkbox(&mut bs.png_all, "All slides (one file each)");
+                        ui.add(egui::Slider::new(&mut bs.image_scale, 0.5..=4.0).text("Scale").step_by(0.5));
+                    }
+                    if bs.file_type == "gif" {
+                        ui.add(egui::Slider::new(&mut bs.gif_seconds, 0.5..=20.0).text("Seconds per slide").step_by(0.5));
+                        ui.checkbox(&mut bs.gif_loop, "Loop");
+                    }
+                    if matches!(bs.file_type, "mp4" | "webm") {
+                        ui.horizontal(|ui| {
+                            ui.label("Size:");
+                            egui::ComboBox::from_id_salt("backstage_filetype_video_size")
+                                .width(140.0)
+                                .selected_text(match bs.video_width {
+                                    1280 => "720p",
+                                    3840 => "4K (2160p)",
+                                    _ => "1080p",
+                                })
+                                .show_ui(ui, |ui| {
+                                    for (width, label) in [(1280u32, "720p"), (1920, "1080p"), (3840, "4K (2160p)")] {
+                                        if ui.selectable_label(bs.video_width == width, label).clicked() {
+                                            bs.video_width = width;
+                                        }
+                                    }
+                                });
+                            egui::ComboBox::from_id_salt("backstage_filetype_video_fps")
+                                .width(96.0)
+                                .selected_text(format!("{} fps", bs.video_fps))
+                                .show_ui(ui, |ui| {
+                                    for fps in [24u32, 30, 60] {
+                                        if ui.selectable_label(bs.video_fps == fps, format!("{fps} fps")).clicked() {
+                                            bs.video_fps = fps;
+                                        }
+                                    }
+                                });
+                        });
+                        ui.checkbox(&mut bs.video_timings, "Use recorded slide timings");
+                    }
+                    if bs.file_type == "pdf" {
+                        ui.checkbox(&mut bs.pdf_hidden, "Include hidden slides");
+                        ui.checkbox(&mut bs.pdf_text_layer, "Keep text selectable and searchable");
+                        ui.horizontal(|ui| {
+                            ui.label("Colour:");
+                            egui::ComboBox::from_id_salt("backstage_filetype_pdf_color")
+                                .width(160.0)
+                                .selected_text(match bs.print_color {
+                                    "grayscale" => "Grayscale",
+                                    "blackAndWhite" => "Black and White",
+                                    _ => "Color",
+                                })
+                                .show_ui(ui, |ui| {
+                                    for (id, label) in [("color", "Color"), ("grayscale", "Grayscale"), ("blackAndWhite", "Black and White")] {
+                                        if ui.selectable_label(bs.print_color == id, label).clicked() {
+                                            bs.print_color = id;
+                                        }
+                                    }
+                                });
+                        });
+                    }
+                    ui.add_space(12.0);
                     if square_button(ui, Icon::SaveAs, "Save As", true).clicked() {
-                        let extra = if png && bs.png_transparent { json!({"transparentBackground": true}) } else { json!({}) };
-                        app.export_as(bs.file_type, extra);
+                        let extra = export_extra(bs, bs.file_type);
+                        let spec = deckcraft_engine::formats::by_id(bs.file_type);
+                        if spec.is_some_and(|f| f.kind == deckcraft_engine::formats::FormatKind::Editable) {
+                            app.save_as_dialog(bs.file_type);
+                        } else {
+                            app.export_as(bs.file_type, extra);
+                        }
                     }
                 }
             }
         });
     });
+}
+
+/// Whether this build can encode video: the desktop app with ffmpeg on PATH.
+fn video_ready() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        deckcraft_engine::video_export::ffmpeg_path().is_some()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
 }
 
 fn bullets(ui: &mut Ui, items: &[&str]) {

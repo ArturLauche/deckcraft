@@ -251,7 +251,81 @@ pub fn builtin_themes() -> Vec<Theme> {
             "Roboto",
             "Roboto",
         ),
+        t(
+            "Terracotta",
+            scheme(
+                "Terracotta",
+                ["2B1B17", "FFF8F0", "5C3A2E", "F6E7D8", "C05621", "DD6B20", "9C4221", "2F855A", "2C5282", "805AD5", "C05621", "2F855A"],
+            ),
+            "Playfair Display",
+            "Lato",
+        ),
+        t(
+            "Blueprint",
+            scheme(
+                "Blueprint",
+                ["0A2540", "FFFFFF", "133B5C", "E6F0F7", "1D6FA5", "2E9CCA", "48B3D9", "F2C14E", "E4572E", "5C6B73", "1D6FA5", "E4572E"],
+            ),
+            "Roboto",
+            "Roboto",
+        ),
+        t(
+            "Orchard",
+            scheme(
+                "Orchard",
+                ["1F2A1A", "FFFDF5", "3A4A2F", "F1F3E4", "6B8E23", "A4B465", "C49A3A", "B5651D", "7A4E2D", "4F6F52", "6B8E23", "C49A3A"],
+            ),
+            "Merriweather",
+            "Nunito Sans",
+        ),
+        t(
+            "Monochrome",
+            scheme(
+                "Monochrome",
+                ["111111", "FFFFFF", "333333", "F4F4F4", "555555", "777777", "999999", "BBBBBB", "2B2B2B", "666666", "333333", "555555"],
+            ),
+            "Inter",
+            "Inter",
+        ),
     ]
+}
+
+/// A dark counterpart of `theme`: a deep background, light text, and accents lifted until they
+/// stay legible on it. Used by File ▸ New's Dark template variant; the fonts are unchanged.
+pub fn dark_variant(theme: &Theme) -> Theme {
+    let c = theme.colors.colors;
+    // Pick a dark base for the background: the theme's dark text colour when it is dark, else its
+    // dark secondary. Keep the hue and saturation, but make the lightness clearly dark.
+    let base = if c[0].luminance() < 0.3 { c[0] } else { c[2] };
+    let (h, sat, _) = base.to_hsl();
+    let bg = Rgba::from_hsl(h, sat.clamp(0.08, 0.45), 0.10, 255);
+    let light = if c[1].contrast(bg) >= 7.0 { c[1] } else { Rgba::WHITE };
+    let lift = |col: Rgba| {
+        if col.contrast(bg) >= 3.0 {
+            col
+        } else {
+            let (h, s, _) = col.to_hsl();
+            Rgba::from_hsl(h, s.max(0.25), 0.68, col.a)
+        }
+    };
+    let mut colors = c;
+    colors[0] = light;
+    colors[1] = bg;
+    colors[2] = lift(c[3]);
+    // `lt2` is a surface, not text: lift it just enough to separate from the page without
+    // pretending to be a readable foreground.
+    colors[3] = Rgba::from_hsl(h, sat.clamp(0.08, 0.45), 0.18, 255);
+    for slot in &mut colors[4..] {
+        *slot = lift(*slot);
+    }
+    let name = format!("{} Dark", theme.name);
+    Theme {
+        name: name.clone(),
+        colors: ColorScheme { name, colors },
+        fonts: theme.fonts.clone(),
+        format: theme.format.clone(),
+        raw_extra: theme.raw_extra.clone(),
+    }
 }
 
 /// Named colour schemes for Design ▸ Variants ▸ Colors.
@@ -346,4 +420,27 @@ pub fn builtin_format_schemes() -> Vec<FormatScheme> {
     plain.effects = vec![Effects::default(), Effects::default(), Effects::default()];
 
     vec![default_format(), soft, crisp, lift, glow_scheme, plain]
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    #[test]
+    fn dark_variant_keeps_text_and_accents_legible() {
+        for theme in builtin_themes() {
+            let dark = dark_variant(&theme);
+            assert!(dark.name.ends_with(" Dark"));
+            let bg = dark.colors.colors[1];
+            assert!(bg.luminance() < 0.2, "{} background is dark", theme.name);
+            assert!(dark.colors.colors[0].contrast(bg) >= 7.0, "{} text", theme.name);
+            for i in [2, 4, 5, 6, 7, 8, 9, 10, 11] {
+                let c = dark.colors.colors[i];
+                assert!(c.contrast(bg) >= 3.0, "{} slot {i}: {c:?} on {bg:?}", theme.name);
+            }
+            assert_eq!(dark.fonts, theme.fonts);
+        }
+    }
 }

@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~20 points and ~120–210 h away
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** major (community PR wave 2026-10-14: ~60 landed items in the progress log, among them the Font, Paragraph, Photo Album, theme colour and font and Date and Time dialogs, presenter and show controls, the SmartArt Text Pane and PPTX corpus slices; breadth 84% after `cargo xtask parity`, ready stays ~55%, stage stays alpha; duplicated rows and headers folded; previous: minor, hours to ~95% per audience added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (live collaboration over a shared folder or self-hosted TCP relay, with ordered journals, roles, presence, cursors, snapshot undo and recovery; CRDT merge and relay TLS remain; previous: video export, format registry, templates, share links, settings sync and print colour) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -14,7 +14,7 @@ format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and av
 
 | | Value | Kind |
 |---|---|---|
-| **Feature breadth** | **84%** weighted over 191 PowerPoint features (P0 92%, P1 82%, P2 55%) | measured: `cargo xtask parity` over [docs/parity-checklist.md](docs/parity-checklist.md) |
+| **Feature breadth** | **84%** weighted over 195 PowerPoint features (P0 92%, P1 82%, P2 55%) | measured: `cargo xtask parity` over [docs/parity-checklist.md](docs/parity-checklist.md) |
 | Menu-bar coverage | 59% of 217 app-specific PowerPoint menu items matched by name (lower bound) | measured: script over the PowerPoint menu dump and the 226 commands at d556ff9 (the registry has grown since; not re-measured) |
 | **Ready for real work** | **~55%** | estimated: weighted dimensions below |
 | Mainstream practitioner | ~53% | estimated: weekly-use areas × discounts for interaction (×0.92), stability (×0.92) and `.pptx` exchange (×0.88), [method](docs/target-app-parity.md#mainstream-practitioner-and-essentials-user) |
@@ -26,7 +26,7 @@ format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and av
 
 | Audience | Ready | Opus 5.5 agent hours to ~95% | Work that dominates |
 |---|---:|---|---|
-| Full target (ready for real work) | ~55% | 340–600 (~60% parallelizes: ~120–210 h wall clock with 3–4 agents) | Feature depth across all 20 areas, legacy `.ppt`/`.odp` and video export, localization in 11+ languages, GPU raster and hardware decode, AI features |
+| Full target (ready for real work) | ~55% | 340–600 (~60% parallelizes: ~120–210 h wall clock with 3–4 agents) | Feature depth across all 20 areas, legacy `.ppt`/`.odp`, real-time co-editing, localization in 11+ languages, GPU raster and hardware decode, AI features |
 | Mainstream practitioner | ~53% | 150–250 (~50% parallelizes: ~70–120 h with 3 agents) | `.pptx` exchange (real-deck corpus, round-trip losses, EMF/SVG, embedded fonts) 45–75 h; depth in charts, animations, pictures, text, presenting, print/vector PDF 70–110 h; interaction (menu bar, Format Shape pane, font faces, dialogs) 25–40 h; stability 10–20 h |
 | Essentials user | ~62% | 50–90 (~40% parallelizes: ~30–55 h with 2–3 agents) | Opening received decks (corpus subset, EMF, SVG icons) 25–45 h; Windows launch fallback and Close prompt 6–12 h; font faces, Tab, paste, print, show navigation 12–20 h; start screen, menu bar, palette 6–10 h |
 
@@ -61,7 +61,7 @@ EMF/SVG pictures, the data-loss and startup-crash bugs (#60, #40, #59) and the b
 
 | Area | Breadth (measured) | Ready (est.) | Hours | Doc |
 |---|---:|---:|---|---|
-| Application shell | 81% | ~55% | 8–14 | [ui-parity](docs/ui-parity.md) |
+| Application shell | 83% | ~55% | 8–14 | [ui-parity](docs/ui-parity.md) |
 | Slides and sections | 92% | ~85% | 3–5 | [checklist](docs/parity-checklist.md) |
 | Views | 98% | ~80% | 3–6 | [ui-parity](docs/ui-parity.md) |
 | Masters and themes | 92% | ~70% | 8–14 | [checklist](docs/parity-checklist.md) |
@@ -77,10 +77,10 @@ EMF/SVG pictures, the data-loss and startup-crash bugs (#60, #40, #59) and the b
 | Transitions | 100% | ~80% | 4–8 | [animation-parity](docs/animation-parity.md) |
 | Animations | 85% | ~65% | 10–16 | [animation-parity](docs/animation-parity.md) |
 | Slide show and presenter view | 68% | ~60% | 10–16 | [slideshow-parity](docs/slideshow-parity.md) |
-| Review | 70% | ~45% | 8–14 | [gaps](docs/gaps.md) |
+| Review | 72% | ~50% | 8–14 | [gaps](docs/gaps.md) |
 | Draw (ink) | 50% | ~30% | 5–9 | [hardware-parity](docs/hardware-parity.md) |
 | Undo and clipboard | 100% | ~75% | 3–5 | [ui-parity](docs/ui-parity.md) |
-| Files (commands; formats above) | 75% | ~50% | in file formats | [file formats](docs/file-format-parity.md) |
+| Files (commands; formats above) | 78% | ~50% | in file formats | [file formats](docs/file-format-parity.md) |
 
 ## Languages
 
@@ -117,7 +117,7 @@ Ranked; detail and the full beta plan in [docs/roadmap.md](docs/roadmap.md).
    and animation bounce end. Still open: a corpus of real decks, #70, #74, #77, EMF+ records,
    MicroType Express font subsets and SVG. 36–64 h.
 3. **Localization:** catalog, system language (#15), zh-Hans, es, fr, de, ja with IME. 27–46 h.
-4. **Output:** vector PDF, printing. 10–16 h.
+4. **Output:** vector PDF, native print dialogs, print margins and scaling. 10–16 h.
 5. **Depth that users hit:** font weights (#69), chart data and elements, Animation Pane timeline,
    presenter view on the right display, native macOS menu bar, Format Shape pane. 33–56 h.
 
@@ -131,6 +131,12 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-19 | Video export: MP4/H.264 and WebM/VP9 through the system `ffmpeg`, 720p/1080p/4K, 24/30/60 fps, per-slide or rehearsed timings, transitions and build animations, optional autoplay audio, slide ranges and hidden slides, progress and cancel. File ▸ Export, Save As, `file.export`, CLI and MCP share the same options; a missing encoder is an explicit error. The animated GIF still shows one frame per slide |
+| 2026-10-19 | Save As and Export use one 13-format registry with editable formats first (`.deckcraft`, `.pptx`, `.potx`, `.ppsx`) and copies after (PDF, PNG, JPEG, WebP, GIF, MP4, WebM, TXT, MD), each with its losses, options and desktop/web availability. WebP keeps transparency; Markdown exports titles, bullets, notes and comments. `.potx` and `.ppsx` now carry their real content types |
+| 2026-10-19 | Live collaboration: File ▸ Share starts or joins a journal on a shared folder or a self-hosted TCP relay. Peers append ordered commands, enforce editor/commenter/viewer roles, publish presence and remote cursors, and converge after undo/redo or a failed command through snapshots and recovery requests; reconnect reads the snapshot and journals. The relay adds room tokens and survives restarts; a CRDT merge and relay TLS remain open |
+| 2026-10-19 | File ▸ Share: capability links with viewer, commenter or editor access, expiry and revocation, invitations and participant removal, in a sidecar beside the deck. The engine refuses edits and pointer gestures for restricted sessions; a viewer can save a copy elsewhere and edit that copy. Real-time co-editing and a relay service have since landed; CRDT merge remains |
+| 2026-10-19 | Preferences ▸ Settings sync: opt-in, per-category sync through a local folder, S3-compatible storage or Google Drive, with last-writer-wins by category, a stale remote guard, conflict reporting and owner-only credentials. Local settings stay primary and an offline sync fails without changing the deck |
+| 2026-10-19 | Print, templates, sync and views: PDF colour, grayscale or black-and-white; slide/notes/handout layouts, ranges, paper, orientation and frame options; margins, scaling, custom header/footer, page numbers, fit-to-paper and direct `lp` printing; template theme/dark/font customisation; optional AES-256-GCM settings-sync encryption; reading view notes and zoom; Fit width in the zoom dialog. The per-platform OS print sheet remains open |
 | 2026-10-17 | Opening a file caps absurd effect sizes (glow, soft edges, shadows, reflections, on shapes, text and table text) at what Format Shape allows: a glow of 10^18 pt in a .pptx made rendering ask for 34 GB and abort |
 | 2026-10-17 | Opening a .deckcraft file whose shapes repeat an id gives the repeats fresh ids (groups, layouts and masters too), so the deck validates and edits by id find one shape |
 | 2026-10-17 | Edit Points: turning a shape into a freeform is one undo step, so Undo brings the original shape back (it used to stay a freeform) |
@@ -237,6 +243,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | major | Video export, the format registry, template gallery, share links and settings sync. `cargo xtask parity` keeps breadth 84% over 195 features (P0 92%, P1 82%, P2 55%); ready ~55%, stage alpha |
 | 2026-10-15 | trivial | Progress log: PPTX trigger click-step round trip. Feature scores and milestone names unchanged |
 | 2026-10-16 | trivial | Progress log: PNG export with a transparent background (#784) |
 | 2026-10-16 | trivial | Progress log: a `.ppsx` from the system starts the slide show (#862) |

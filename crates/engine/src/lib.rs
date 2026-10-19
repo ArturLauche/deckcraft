@@ -8,11 +8,13 @@
 #![forbid(unsafe_code)]
 
 pub mod cmd;
+pub mod collab;
 pub mod compare;
 pub mod connect;
 pub mod drawtable;
 pub mod file_access;
 pub mod fonts;
+pub mod formats;
 pub mod gif_export;
 pub mod guard;
 pub mod icons;
@@ -23,11 +25,14 @@ pub mod links;
 pub mod media_refs;
 pub mod recovery;
 pub mod sample;
+pub mod sharing;
 pub mod sounds;
 pub mod spell;
+pub mod sync;
 pub mod templates;
 pub mod thesaurus;
 pub mod tools;
+pub mod video_export;
 
 use std::sync::Arc;
 
@@ -222,6 +227,8 @@ pub struct DocState {
     pub composition: Option<Composition>,
     /// Review › Compare in progress: the revised copy.
     pub compare: Option<compare::Compare>,
+    /// What a share link opened this presentation for; the ordinary editor is [`sharing::Access::Full`].
+    pub access: sharing::Access,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -231,6 +238,42 @@ static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 /// [`recovery::instance_id`]) plus a counter.
 fn next_uid() -> u64 {
     recovery::instance_id().wrapping_add(NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) & recovery::UID_MASK
+}
+
+/// Whether a share with `access` may run `id`. A restricted session can still navigate, present,
+/// export, print and read; a commenter may also add, reply to, resolve and delete comments.
+fn command_allowed(access: sharing::Access, id: &str, spec: &cmd::CommandSpec, params: &Value, current_path: Option<&str>) -> bool {
+    if access == sharing::Access::Full {
+        return true;
+    }
+    // Saving a copy elsewhere is how a viewer or commenter starts editing their own version;
+    // saving over the shared file is not. `file.saveAs` sets the copy back to full access.
+    if id == "file.saveAs" {
+        let target = params.get("path").and_then(Value::as_str).map(|path| {
+            let format =
+                params.get("format").and_then(Value::as_str).or_else(|| crate::cmd::file::writable_format_for_path(path)).unwrap_or("deckcraft");
+            crate::cmd::file::path_with_format(path, format)
+        });
+        return target.is_some_and(|path| current_path.is_none_or(|current| !crate::io::paths_equal(&path, current)));
+    }
+    // Share links are capability tokens: a viewer must not list other people's tokens (which
+    // would let them open an editor link) or mint, revoke or invite. Opening a link and parsing
+    // one they already have stay available.
+    if id.starts_with("share.") {
+        return matches!(id, "share.open" | "share.parseLink");
+    }
+    // Reloading from disk would throw away a commenter's unsaved comments, and it is not an edit
+    // they can undo. Everything else that writes the document or its saved copy is below.
+    if id == "file.revert" {
+        return false;
+    }
+    // Most edits are undoable; these change the document or its saved copy without an undo step.
+    let mutating =
+        spec.undoable || matches!(id, "edit.undo" | "edit.redo" | "edit.repeat" | "file.save" | "file.saveTemplate" | "text.compose" | "text.commit");
+    if !mutating {
+        return true;
+    }
+    access.allows_comment() && id.starts_with("comment.")
 }
 
 impl DocState {
@@ -249,6 +292,7 @@ impl DocState {
             missing_fonts: Vec::new(),
             composition: None,
             compare: None,
+            access: sharing::Access::Full,
         }
     }
     pub fn is_dirty(&self) -> bool {
@@ -465,6 +509,8 @@ pub struct Session {
     depth: u32,
     /// Crash-recovery folder (the app sets it; saving or closing a presentation removes its entry).
     pub recovery_dir: Option<std::path::PathBuf>,
+    /// User template folder (the app sets it; File › New lists these beside the built-ins).
+    pub template_dir: Option<std::path::PathBuf>,
     /// Media playback state, written by the UI host every frame (empty without a host).
     pub media_status: std::collections::HashMap<ShapeId, MediaStatus>,
     /// Animated GIF pictures paused with `media.gifPlay` (the others play).
@@ -478,6 +524,11 @@ pub struct Session {
     /// Presentations a host read off the UI thread, waiting for `file.adopt` (by token).
     loaded: Vec<(u64, cmd::file::LoadedFile)>,
     next_loaded: u64,
+    /// A live shared-folder session, when this document is collaborating.
+    pub collab: Option<collab::Collab>,
+    /// True while a remote journal command is being applied: it must not be echoed back to the
+    /// journal and must not become a local undo step.
+    remote_apply: bool,
 }
 
 impl Default for Session {
@@ -503,12 +554,15 @@ impl Session {
             anim_painter: None,
             depth: 0,
             recovery_dir: None,
+            template_dir: None,
             media_status: Default::default(),
             gif_paused: Default::default(),
             mac_keys: cfg!(target_os = "macos"),
             panics_caught: 0,
             loaded: vec![],
             next_loaded: 0,
+            collab: None,
+            remote_apply: false,
         }
     }
     /// Hand over a presentation read on another thread ([`cmd::file::read_presentation_file`]);
@@ -562,6 +616,12 @@ impl Session {
         self.active = Some(self.docs.len() - 1);
         self.docs.len() - 1
     }
+
+    /// Set the active presentation's access (a share link opened it for less than full editing).
+    pub fn set_access(&mut self, access: sharing::Access) -> Result<()> {
+        self.doc_mut()?.access = access;
+        Ok(())
+    }
     pub fn close_document(&mut self, i: usize) {
         if i < self.docs.len() {
             let d = self.docs.remove(i);
@@ -579,11 +639,55 @@ impl Session {
     /// Run command `id`. A panic inside it becomes [`EngineError::Internal`] and leaves the
     /// presentation as it was.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
+        // A headless host (CLI, MCP, control channel) has no frame loop, so catch up on the live
+        // journal before each command. The UI also ticks every 150 ms for idle peers.
+        if self.collab.is_some() && !self.remote_apply {
+            let _ = self.collab_tick();
+        }
         self.guarded(id, |s| s.execute_unguarded(id, params))
     }
 
     fn execute_unguarded(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.into()))?;
+        // A share link opens the presentation with less than full access. Navigation, the show,
+        // export and queries stay available; edits are refused here, not merely hidden in the UI.
+        let access = self.active().map(|d| d.access).unwrap_or(sharing::Access::Full);
+        let current_path = self.active().and_then(|d| d.path.clone());
+        if !self.remote_apply && access != sharing::Access::Full && !command_allowed(access, id, spec, params, current_path.as_deref()) {
+            return Err(EngineError::Disabled(
+                id.into(),
+                format!("this presentation is shared for {}; save a copy to edit it", access.label().to_lowercase()),
+            ));
+        }
+        // A live session is tied to the open document. Switching documents underneath it would
+        // broadcast the wrong deck, so leave first.
+        if !self.remote_apply
+            && self.collab.is_some()
+            && matches!(
+                id,
+                "file.new"
+                    | "file.open"
+                    | "file.adopt"
+                    | "file.openBytes"
+                    | "file.close"
+                    | "file.recovery.open"
+                    | "file.revert"
+                    | "share.open"
+                    | "app.closePresentation"
+            )
+        {
+            return Err(EngineError::Disabled(id.into(), "leave the live session before opening, closing or reverting the presentation".into()));
+        }
+        // A live peer's role is enforced here too: hiding a button in the Share page is not enough.
+        if !self.remote_apply
+            && let Some(c) = &self.collab
+            && !c.role.allows(id, spec)
+        {
+            return Err(EngineError::Disabled(
+                id.into(),
+                format!("this live session is {}; ask the owner for edit access", c.role.label().to_lowercase()),
+            ));
+        }
         // Any other edit (or a click, a key, undo) settles an input method's composition first.
         if self.depth == 0 && (spec.journal || spec.undoable) && !matches!(id, "text.compose" | "text.commit") {
             self.end_composition();
@@ -634,7 +738,85 @@ impl Session {
                 self.journal.drain(..1000);
             }
         }
+        if outer && !self.remote_apply {
+            let snapshot = matches!(id, "edit.undo" | "edit.redo" | "edit.repeat").then(|| self.active().map(|d| (*d.doc).clone())).flatten();
+            if let Some(c) = &mut self.collab {
+                if let Some(doc) = snapshot {
+                    let _ = c.write_snapshot(&doc);
+                } else if spec.undoable || matches!(id, "text.compose" | "text.commit") || id.starts_with("comment.") {
+                    c.append(id, params);
+                }
+            }
+        }
         Ok(r)
+    }
+
+    /// Apply a command that came from another live peer. It is not echoed to the journal and does
+    /// not become a local undo step; a failure is handled by the collaboration layer (snapshot).
+    pub fn execute_remote(&mut self, id: &str, params: &Value) -> Result<Value> {
+        self.remote_apply = true;
+        let r = self.execute(id, params);
+        self.remote_apply = false;
+        r
+    }
+
+    /// Replace the active document with a peer's snapshot. The path, title, access and identity
+    /// stay local; the history is reset because it describes a document that is no longer here.
+    pub(crate) fn adopt_remote_document(&mut self, doc: Presentation) -> Result<()> {
+        let st = self.doc_mut()?;
+        let (path, title, access, uid) = (st.path.clone(), st.title.clone(), st.access, st.uid);
+        let selection = st.selection.clone();
+        let slides = doc.slides.len();
+        let masters = doc.masters.len();
+        let mut next = DocState::new(doc, path, title);
+        next.access = access;
+        next.uid = uid;
+        // Keep the reader on the slide they were looking at. Shape, text and cell selections are
+        // dropped: their ids may not exist in the snapshot.
+        next.selection.slide = selection.slide.min(slides.saturating_sub(1));
+        next.selection.target = match selection.target {
+            Target::Master { master } if master < masters => Target::Master { master },
+            Target::Layout { master, layout } if master < masters && layout < next.doc.masters[master].layouts.len() => {
+                Target::Layout { master, layout }
+            }
+            Target::Handout => Target::Handout,
+            Target::NotesMaster => Target::NotesMaster,
+            _ => Target::Slides,
+        };
+        *st = next;
+        Ok(())
+    }
+
+    /// Refresh the live session: presence, remote commands and newer snapshots. Called once a
+    /// frame by the UI; a headless host can call it between commands.
+    pub fn collab_tick(&mut self) -> Result<()> {
+        let Some(mut c) = self.collab.take() else { return Ok(()) };
+        let r = c.tick(self);
+        self.collab = Some(c);
+        r
+    }
+
+    pub fn collab_status(&self) -> Option<collab::Status> {
+        self.collab.as_ref().map(collab::Collab::status)
+    }
+
+    /// Publish this peer's pointer on the current slide, normalized to the slide rectangle.
+    pub fn collab_cursor(&mut self, slide: usize, x: f32, y: f32) {
+        if let Some(c) = &mut self.collab {
+            c.set_cursor(slide, x, y);
+        }
+    }
+
+    pub fn collab_clear_cursor(&mut self) {
+        if let Some(c) = &mut self.collab {
+            c.clear_cursor();
+        }
+    }
+
+    pub fn collab_leave(&mut self) {
+        if let Some(mut c) = self.collab.take() {
+            c.leave(self);
+        }
     }
 
     pub fn commands(&self) -> Vec<CommandInfo> {

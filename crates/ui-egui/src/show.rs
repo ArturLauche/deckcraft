@@ -16,6 +16,8 @@ pub struct Show {
     pub state: ShowState,
     pub reading: bool,
     pub presenter: bool,
+    /// Reading view: the speaker notes panel is open.
+    pub reading_notes: bool,
     /// Preview from the Transitions/Animations tab: exits after the current slide.
     pub preview_only: bool,
     /// Play every step automatically (animation preview).
@@ -174,6 +176,7 @@ impl Show {
             state: ShowState::start_at(doc, from),
             reading,
             presenter,
+            reading_notes: false,
             preview_only: false,
             autoplay: false,
             rehearse: false,
@@ -962,11 +965,17 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         );
         let mut child = ui.new_child(
             egui::UiBuilder::new()
-                .max_rect(Rect::from_min_max(pos2(bar.max.x - 260.0, bar.min.y), bar.max))
+                .max_rect(Rect::from_min_max(pos2(bar.max.x - 390.0, bar.min.y), bar.max))
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
         if child.button("Close").clicked() {
             keep = false;
+        }
+        if child.button(if show.reading_notes { "Notes on" } else { "Notes" }).clicked() {
+            show.reading_notes = !show.reading_notes;
+        }
+        if child.button(show.zoom_label()).clicked() {
+            show.zoom_key();
         }
         if child.button("▶").clicked() {
             let a = show.state.next(&doc);
@@ -977,6 +986,16 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         if child.button("◀").clicked() {
             let a = show.state.prev(&doc);
             show.apply(a, &doc, now);
+        }
+        if show.reading_notes {
+            let notes = doc.slides.get(show.state.slide).map(|s| s.notes_text()).unwrap_or_default();
+            let panel = Rect::from_min_max(pos2(full.min.x, bar.min.y - 168.0), pos2(full.max.x, bar.min.y));
+            painter.rect_filled(panel, CornerRadius::ZERO, Color32::from_black_alpha(218));
+            painter.line_segment([panel.left_top(), panel.right_top()], Stroke::new(1.0, Color32::from_gray(70)));
+            let text = if notes.trim().is_empty() { "No speaker notes on this slide.".to_string() } else { notes };
+            let text_rect = panel.shrink2(vec2(20.0, 12.0));
+            let galley = painter.layout(text, theme::font(14.0), Color32::from_gray(232), text_rect.width());
+            painter.with_clip_rect(text_rect).galley(text_rect.min, galley, Color32::from_gray(232));
         }
     } else if !show.grid && (now - show.last_move < 2.5 || show.zoom_arm) {
         let bar = tool_bar_rect(full);

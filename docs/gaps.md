@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** major (community PR wave 2026-10-14: soak tests, PPTX corpus, comment threads (#70), embedded fonts, SmartArt Text Pane, Animation Pane timeline, Hunspell spelling, thesaurus, AutoCorrect, 14 new dialogs, pen pressure and trackpad gestures; duplicated entries and headers folded; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (a self-hosted TCP relay joins the shared-folder live session; template customisation and encrypted settings sync land; CRDT merge and relay TLS remain; previous: print margins, video export, format registry, share links) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -22,7 +22,7 @@ revision history.
 | 3 | PPTX round trip drops media options and rewind (#74, #77) | File format | B | 2–4 | [file-format-parity.md](file-format-parity.md) |
 | 4 | SVG pictures don't render (EMF/WMF do) | File format | B | 4–8 | [file-format-parity.md](file-format-parity.md) |
 | 5 | No localization: English only | Localization | B (infra + 5 languages) | 55–90 | [localization-parity.md](localization-parity.md) |
-| 6 | No printing | Feature | B | 5–8 | [file-format-parity.md](file-format-parity.md) |
+| 6 | Printing uses PDF/direct `lp`; no per-platform native print sheet | Feature | C | 1–2 | [file-format-parity.md](file-format-parity.md) |
 | 7 | Fonts: only Regular, Bold and Italic faces (#69) | Feature | B | 3–5 | [ui-parity.md](ui-parity.md) |
 | 8 | Image paste fails on Windows and Linux (#53) | Feature | B | 2–4 | [ui-parity.md](ui-parity.md) |
 | 9 | Presenter view isn't placed on the second display | Hardware | B | 3–5 | [slideshow-parity.md](slideshow-parity.md) |
@@ -133,18 +133,24 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Impact:** large PDFs; blurry when zoomed or printed.
 - **Estimate:** 5–8 h (vector paths, fills and text through the PDF writer). **Beta blocker.**
 
-### No printing
-- **Evidence:** checklist row "Print" is missing; PR #66 (browser print) is open.
-- **Impact:** handouts and speaker notes are printed in many workplaces.
-- **Estimate:** 5–8 h (print through the PDF path and each OS's print dialog). **Beta blocker.**
+### Printing has no per-platform native print sheet
+- **Evidence:** File ▸ Print renders the selected slides, notes or handouts to PDF with range,
+  layout, paper, orientation, frame, colour/grayscale/black-and-white, margins, scaling, custom
+  header/footer, page numbers and fit-to-paper. It opens the PDF, or on Unix-like systems with
+  CUPS sends it directly with `lp`. The preview shows the same margin, scale and header/footer.
+- **Impact:** the native sheet (printer choice, copies, duplex) is still the OS PDF viewer's job;
+  the direct path uses the default printer. The PDF path works everywhere.
+- **Estimate:** 1–2 h for a platform print sheet; not a beta blocker.
 
-### No video export; the animated GIF has no transitions or builds
-- **Evidence:** checklist row "Export video (MP4) / animated GIF" is partial: `file.export` writes
-  an animated GIF with one frame per slide (#171), but there is no MP4/MOV export, and the GIF
-  doesn't animate transitions or build animations.
-- **Impact:** sharing a talk as a video is a common request.
-- **Estimate:** 10–16 h (render the timeline frame by frame, which the GIF can then reuse for
-  transitions and builds; an H.264 encoder is the hard part, FilmCraft has one to copy).
+### Video export needs an external ffmpeg; GIF still doesn't animate transitions or builds
+- **Evidence:** `file.export` writes MP4/H.264 and WebM/VP9 with the system `ffmpeg`, including
+  timings, transitions, builds and optional autoplay audio. A missing ffmpeg or encoder is an
+  explicit error. The animated GIF remains one frame per slide, and there is no MOV writer or
+  bundled/hardware encoder.
+- **Impact:** a machine without ffmpeg cannot export video, and the GIF still looks like a
+  slideshow rather than a recording.
+- **Estimate:** 4–8 h (bundle or find a portable encoder, MOV, and reuse the video timeline for the
+  GIF).
 
 ### Embedded MicroType Express font subsets aren't drawn
 - **Evidence:** `p:embeddedFontLst` is read and written. A raw TrueType/OpenType face, or one inside an Embedded OpenType wrapper, is loaded and used to draw. A MicroType Express subset (`application/x-fontdata` with neither form) is kept and written back, and the text still uses a stand-in.
@@ -152,6 +158,24 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Estimate:** 3–5 h.
 
 ## Features
+
+### Live collaboration: CRDT merge and transport security
+- **Evidence:** File ▸ Share starts or joins a live session (`collab.start`, `collab.join`,
+  `collab.leave`, `collab.status`, `collab.cursor`) on a shared folder or a self-hosted relay
+  (`deckcraft-cli relay`). Peers append ordered commands to `journal-<peer>.jsonl`, publish
+  presence and cursors, enforce editor / commenter / viewer roles before local and remote
+  commands, and converge after undo/redo or a failed command through snapshots and recovery
+  requests. Reconnect reads the snapshot and journals after a restart. The relay stores the same
+  room files, authenticates every request with a room token, confines names to the room and
+  survives a restart.
+- **Remaining:** commands are ordered by `(timestamp, peer, sequence)`, not merged by a CRDT: two
+  edits to the same text at the same instant are last-writer-wins, not interleaved. The relay
+  speaks plain TCP, so a public deployment needs TLS at a reverse proxy; the token is a shared
+  room secret, not per-user identity, and there is no end-to-end encryption.
+- **Impact:** teams can now co-edit across the internet without a shared folder, but simultaneous
+  typing is not character-perfect and a relay operator can read the room.
+- **Estimate:** 10–18 h (a CRDT or per-shape text merge, per-user relay identities, TLS and
+  reconnect/merge tests).
 
 ### Font weights beyond Regular, Bold and Italic (#69)
 - **Evidence:** #69; the font database maps a family to four faces.
@@ -284,8 +308,9 @@ Detail in [ui-parity.md](ui-parity.md).
   blocker.**
 - **Format Shape pane thinner than PowerPoint's** (Fill/Line/Effects/Size/Text Box pages, picture
   and texture options, 3-D). 6–10 h. **Beta blocker.**
-- **File tab depth** (#76 landed the Backstage): no online templates, cloud places, printer
-  choice, video/GIF/CD exports or document protection. 4–8 h for the parts that need no cloud.
+- **File tab depth** (#76 landed the Backstage): no online templates, cloud places, native print sheet
+  choice, CD exports or document protection. Video/GIF export, sharing links and settings sync are
+  in. 4–8 h for the parts that need no cloud.
 - **Window chrome** (#71 macOS controls misaligned, #26 GNOME title bar, #41 system light/dark).
   2–4 h.
 - **Icon consistency across Craft apps** (#73, #56). 2–4 h; coordinate in craftrules.
@@ -337,11 +362,12 @@ Detail in [localization-parity.md](localization-parity.md).
 
 ## Ecosystem
 
-- **Six original starter decks; PowerPoint's large template gallery remains.** File › New and the
-  start screen offer Briefing, Lesson, Pitch, Field Notes, Quarterly and Evening Talk
-  (`file.new {template}`), each a few slides on one of our themes. Dozens of further offline
-  designs, and any online gallery, are still absent. 4–8 h for a larger original set (asset policy:
-  our own designs only).
+- **Seventeen original starter decks; PowerPoint's large template gallery remains.** File › New
+  and the start screen offer 17 decks in 10 categories (`file.new {template}`), each a few slides
+  on one of our themes, with search, favourites and user templates. A starter can take another
+  theme, a generated dark variant and a heading/body font pair (`theme`, `variant`, `fonts`).
+  Dozens of further offline designs, and any online gallery, are still absent. 4–8 h for a larger
+  original set (asset policy: our own designs only).
 - **No add-ins or VBA.** Out of scope by policy; MCP/CLI automation is the alternative.
 
 ## AI features
@@ -354,6 +380,12 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Live collaboration gains a self-hosted TCP relay with room tokens, persistence and reconnect; CRDT merge and transport TLS remain |
+| 2026-10-19 | minor | Settings sync can encrypt its remote snapshot with AES-256-GCM/Argon2id; enabling it re-uploads a plain remote |
+| 2026-10-19 | minor | Starter and user templates take a theme override, generated dark variant and heading/body fonts in File › New and `file.new` |
+| 2026-10-19 | minor | Print margins, scaling, custom header/footer, page numbers, fit-to-paper and direct `lp` printing; native OS print sheet remains open |
+| 2026-10-19 | minor | Shared-folder live collaboration lands: ordered journals, roles, presence, cursors, snapshot undo and recovery. A socket relay has since landed; CRDT merge remains |
+| 2026-10-19 | major | Video export and the format registry close the old video gap; printing narrows to native print and margins; share links and settings sync land; real-time co-editing added as the collaboration gap |
 | 2026-10-15 | trivial | PPTX trigger sequences keep later On Click steps instead of converting them to After Previous; mixed starts, independent buttons and paragraph builds have synthetic round-trip regressions |
 | 2026-10-16 | trivial | AutoFormat superscripts ordinals (1st, 22nd) as you type, with an AutoCorrect option to turn it off; automatic bulleted lists remain |
 | 2026-10-14 | trivial | Fixed #718: remote MCP no longer accepts unrelated or buffered stale success; loopback regressions cover invalid envelopes, incomplete and oversized frames |

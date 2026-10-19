@@ -22,19 +22,23 @@ pub mod notes;
 pub mod opening;
 pub mod panes;
 mod preview;
+pub mod print;
 pub mod qat;
 pub mod ribbon;
 pub mod selpane;
 pub mod settings;
+pub mod sharingui;
 pub mod show;
 pub mod sorter;
 pub mod squiggles;
 pub mod status;
+pub mod syncui;
 pub mod textures;
 pub mod theme;
 pub mod thumbs;
 pub mod toast;
 pub mod uifonts;
+pub mod videojob;
 pub mod widgets;
 
 use std::collections::HashMap;
@@ -258,6 +262,8 @@ pub struct UiState {
     pub zoom: Option<f32>,
     pub sorter_zoom: f32,
     pub recent: Vec<String>,
+    /// Starter templates marked with a star in File › New.
+    pub favourite_templates: Vec<String>,
     pub presenter_view: bool,
     pub ui_scale: f32,
     /// Format Shape pane: tab (`fill`, `effects`, `size`, `picture`, `text`).
@@ -296,6 +302,7 @@ impl Default for UiState {
             zoom: None,
             sorter_zoom: 1.0,
             recent: vec![],
+            favourite_templates: vec![],
             presenter_view: true,
             ui_scale: 1.0,
             format_tab: "fill".into(),
@@ -348,6 +355,9 @@ impl UiState {
         self.recent.retain(|p| !p.is_empty() && p.len() <= 4096 && !p.contains('\0'));
         self.recent.dedup();
         self.recent.truncate(RECENT_MAX);
+        self.favourite_templates.retain(|p| !p.is_empty() && p.len() <= 64 && !p.contains('\0'));
+        self.favourite_templates.dedup();
+        self.favourite_templates.truncate(64);
         self
     }
 }
@@ -372,6 +382,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.zoom", "Set Zoom", None, "{percent}"),
     ("view.zoomDialog", "Zoom…", None, "{}"),
     ("view.fit", "Fit to Window", None, "{}"),
+    ("view.fitWidth", "Fit to Width", None, "{}"),
     ("view.pane", "Task Pane", None, "{pane: format|animation|selection|comments|designer|background|smartart|null}"),
     ("review.thesaurusPane", "Thesaurus", Some("Shift+F7"), "{word?}: open the Thesaurus pane on the selected word"),
     ("view.tab", "Ribbon Tab", None, "{tab}"),
@@ -390,7 +401,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         "app.print",
         "Print",
         Some("Cmd+P"),
-        "{layout?, perPage?, slides?, includeHidden?, frame?, paper?: letter|a4|legal|a3, orientation?: portrait|landscape}",
+        "{layout?, perPage?, slides?, includeHidden?, frame?, paper?: letter|a4|legal|a3, orientation?: portrait|landscape, margin?: points 0-216, scale?: percent 10-200, header?, footer?, pageNumbers?, direct?: bool, fitPaper?}",
     ),
     ("app.about", "About DeckCraft", None, "{}"),
     ("app.palette", "Command Palette", Some("Cmd+Shift+P"), "{}"),
@@ -451,6 +462,12 @@ pub struct SlideApp {
     /// Audio/video playback (editor control bar, slide show, `media.*` commands).
     pub media: media::MediaHost,
     pub status: Option<(String, f64)>,
+    /// A video export running in the background (progress and Cancel in a window).
+    pub video_job: Option<videojob::Job>,
+    /// Optional settings sync (Preferences ▸ Settings sync).
+    pub sync: syncui::SyncUi,
+    /// The per-user settings folder; `None` in the browser. Sync and user templates live here.
+    pub settings_dir: Option<std::path::PathBuf>,
     /// A presentation being read in the background, with its progress window ([`opening`]).
     pub opening: Option<opening::Opening>,
     /// A brief notice over the bottom of the window (missing fonts on opening a file).
@@ -546,6 +563,9 @@ impl SlideApp {
             anim_preview: None,
             media: media::MediaHost::new(audio_out),
             status: None,
+            video_job: None,
+            sync: syncui::SyncUi::default(),
+            settings_dir: None,
             opening: None,
             toast: None,
             fonts_noted: Default::default(),
@@ -731,27 +751,29 @@ impl SlideApp {
         format!("{name}.{ext}")
     }
 
-    /// Exports the active presentation as `fmt` (`pdf`, `png`, `pngAll`, `jpeg`, `pptx`,
-    /// `deckcraft`, `outline`) through `file.export`: the save picker on the desktop, a download
-    /// on the web. `extra` adds `file.export` params (the PDF's layout, slides…). The
+    /// Exports the active presentation as `fmt` (any [`deckcraft_engine::formats`] id, plus the
+    /// `pngAll` alias) through `file.export`: the save picker on the desktop, a download on the
+    /// web. `extra` adds `file.export` params (the PDF's layout, the video's size…). The
     /// presentation keeps its own file. Returns whether a file was written or handed over.
     pub fn export_as(&mut self, fmt: &str, extra: Value) -> bool {
         let Some(slide) = self.session.active().map(|d| d.selection.slide) else { return false };
         let (ext, format, all) = match fmt {
-            "pdf" => ("pdf", "pdf", false),
-            "png" => ("png", "png", false),
             "pngAll" => ("png", "png", true),
-            "jpeg" | "jpg" => ("jpg", "jpeg", false),
-            "pptx" => ("pptx", "pptx", false),
-            "outline" | "txt" => ("txt", "outline", false),
-            "deckcraft" => ("deckcraft", "deckcraft", false),
-            "gif" => ("gif", "gif", false),
-            other => {
-                self.set_status(format!("DeckCraft can't export “{other}”"));
-                return false;
-            }
+            "jpg" => ("jpg", "jpeg", false),
+            "txt" => ("txt", "outline", false),
+            "md" => ("md", "markdown", false),
+            other => match deckcraft_engine::formats::by_id(other) {
+                Some(spec) => (spec.extension, spec.id, false),
+                None => {
+                    self.set_status(format!("DeckCraft can't export “{other}”"));
+                    return false;
+                }
+            },
         };
         let suggested = self.suggested_name(ext);
+        if matches!(format, "mp4" | "webm") {
+            return self.export_video(format, extra);
+        }
         if let Some(pick) = self.services.pick_save.as_mut() {
             let Some(path) = pick(&suggested) else { return false };
             let mut params = json!({"path": path, "format": format, "all": all});
@@ -768,21 +790,114 @@ impl SlideApp {
         }
         let Some(doc) = self.session.active().map(|d| d.doc.clone()) else { return false };
         let bytes = match format {
-            "png" | "jpeg" => {
+            "png" | "jpeg" | "webp" => {
                 // Every slide for "all slides", one download each, named like the desktop export (#64).
                 let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
                 let mut any = false;
                 let transparent = extra.get("transparentBackground").and_then(Value::as_bool).unwrap_or(false);
-                for (file, bytes) in web_image_files(&doc, slide, all, &name, ext, transparent) {
+                let scale = extra.get("scale").and_then(Value::as_f64).unwrap_or(2.0);
+                let all = all || extra.get("all").and_then(Value::as_bool).unwrap_or(false);
+                for (file, bytes) in web_image_files(&doc, slide, all, &name, ext, transparent, scale) {
                     any = self.download(&file, Ok(bytes)) || any;
                 }
                 return any;
             }
             "pdf" => deckcraft_engine::cmd::file::pdf_bytes(&doc, &extra),
             "gif" => deckcraft_engine::cmd::file::gif_bytes(&doc, &extra),
+            "mp4" | "webm" => {
+                self.set_status("Video export needs the desktop app: the browser can't run ffmpeg. Export an animated GIF or a PDF instead.");
+                return false;
+            }
             other => deckcraft_engine::cmd::file::save_bytes(&doc, other),
         };
         self.download(&suggested, bytes)
+    }
+
+    /// Starts an MP4/WebM export on a worker thread (desktop): the editor stays usable and the
+    /// progress window can cancel it. The job encodes the deck as it is now. False (with the
+    /// reason in the status bar) when there is no picker, ffmpeg or a valid option.
+    pub fn export_video(&mut self, format: &str, extra: Value) -> bool {
+        let Some(doc) = self.session.active().map(|d| d.doc.clone()) else { return false };
+        let ext = if format == "webm" { "webm" } else { "mp4" };
+        let suggested = self.suggested_name(ext);
+        if self.services.pick_save.is_none() {
+            self.set_status("Video export needs the desktop app: the browser can't run ffmpeg. Export an animated GIF or a PDF instead.");
+            return false;
+        }
+        let picked = self.services.pick_save.as_mut().and_then(|pick| pick(&suggested));
+        let Some(path) = picked else { return false };
+        let mut opts = match deckcraft_engine::video_export::VideoOptions::from_params(&extra) {
+            Ok(o) => o,
+            Err(e) => {
+                self.set_status(e.to_string());
+                return false;
+            }
+        };
+        opts.format =
+            if format == "webm" { deckcraft_engine::video_export::VideoFormat::WebM } else { deckcraft_engine::video_export::VideoFormat::Mp4 };
+        let path = deckcraft_engine::cmd::file::path_with_format(&path, format);
+        if self.video_job.as_ref().is_some_and(|j| j.is_running()) {
+            self.set_status("A video is already being made; wait for it or cancel it first.");
+            return false;
+        }
+        self.video_job = Some(videojob::Job::start(doc, opts, path.clone(), now_ms()));
+        self.set_status(format!("Creating {path}…"));
+        true
+    }
+
+    /// Sync settings now, in the background. The config is saved first, so a sync that changes
+    /// nothing still remembers the provider and categories.
+    pub fn sync_now(&mut self) {
+        self.sync.ensure_loaded(self.settings_dir.as_deref());
+        let Some(dir) = self.settings_dir.clone() else {
+            self.sync.status = "Settings sync needs the desktop app.".into();
+            return;
+        };
+        if !self.sync.config.enabled {
+            self.sync.status = "Turn on settings sync first.".into();
+            return;
+        }
+        if self.sync.config.encrypt && self.sync.config.passphrase.trim().is_empty() {
+            self.sync.status = "Enter a sync passphrase, or turn encryption off.".into();
+            return;
+        }
+        self.sync.persist();
+        let local = self.sync.local_snapshot(self);
+        self.sync.start(dir, local, self.last_time);
+    }
+
+    /// Poll the sync worker and start an automatic sync when it is due. Called once a frame from
+    /// [`SlideApp::logic`]; a finished merge is applied on this (the UI) thread.
+    pub fn sync_tick(&mut self, now: f64) {
+        self.sync.ensure_loaded(self.settings_dir.as_deref());
+        if let Some(state) = self.sync.take_finished() {
+            match state {
+                syncui::State::Done(outcome) => {
+                    let outcome = *outcome;
+                    let changed = syncui::apply(&mut self.ui, &mut self.session.prefs, &outcome.report.snapshot, &outcome.report.applied);
+                    self.sync.state = outcome.state;
+                    self.sync.conflicts = outcome.report.conflicts.clone();
+                    self.sync.status = outcome.report.summary();
+                    if changed {
+                        self.restyle = true;
+                    }
+                }
+                syncui::State::Failed(error) => self.sync.status = format!("Settings sync failed: {error}"),
+                syncui::State::Running => {}
+            }
+        }
+        if !self.sync.config.enabled || !self.sync.config.auto || self.sync.job.is_some() {
+            return;
+        }
+        if self.sync.config.encrypt && self.sync.config.passphrase.trim().is_empty() {
+            return;
+        }
+        let Some(dir) = self.settings_dir.clone() else { return };
+        let interval = f64::from(self.sync.config.interval_minutes.max(1)) * 60.0;
+        if self.sync.last_attempt == 0.0 || now - self.sync.last_attempt >= interval {
+            let local = self.sync.local_snapshot(self);
+            self.sync.start(dir, local, now);
+        }
     }
 
     /// Hands `bytes` to the browser as a download (web); false (with the reason in the status
@@ -810,6 +925,7 @@ impl SlideApp {
     pub fn print_pdf(&mut self, params: Value) -> bool {
         let Some((title, doc)) = self.session.active().map(|d| (d.title(), d.doc.clone())) else { return false };
         let mut params = if params.is_object() { params } else { json!({}) };
+        let direct = params.get("direct").and_then(Value::as_bool).unwrap_or(false);
         if self.services.pick_save.is_none() {
             // Web: the browser hands the PDF to the user.
             let bytes = deckcraft_engine::cmd::file::pdf_bytes(&doc, &params);
@@ -818,13 +934,24 @@ impl SlideApp {
         let safe: String = title.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();
         let path = std::env::temp_dir().join(format!("{safe} (print).pdf")).to_string_lossy().to_string();
         if let Some(o) = params.as_object_mut() {
+            o.remove("direct");
             o.insert("path".into(), json!(path));
             o.insert("format".into(), json!("pdf"));
         }
         match self.run("file.export", params) {
             Ok(_) => {
+                if direct {
+                    match crate::print::send_to_printer(&path) {
+                        Ok(()) => {
+                            self.set_status("Sent the presentation to the default printer");
+                            return true;
+                        }
+                        Err(e) => self.set_status(format!("Couldn't print directly ({e}); opened the PDF instead")),
+                    }
+                } else {
+                    self.set_status("Opened the presentation as a PDF to print");
+                }
                 self.open_url(&format!("file:///{}", path.replace('\\', "/").trim_start_matches('/')));
-                self.set_status("Opened the presentation as a PDF to print");
                 true
             }
             Err(_) => false,
@@ -915,6 +1042,12 @@ impl SlideApp {
             }
             "view.zoomDialog" => self.dialog = Some(dialogs::Dialog::new("zoom")),
             "view.fit" => self.ui.zoom = None,
+            "view.fitWidth" => {
+                let page = self.session.active().map(deckcraft_engine::page_size).unwrap_or(deckcraft_geom::Size::new(960.0, 540.0));
+                let width = self.canvas_rect.map(|r| r.width()).unwrap_or(960.0);
+                let scale = ((width - 56.0).max(80.0) / page.width.max(1.0) as f32).clamp(0.1, 4.0);
+                self.ui.zoom = Some(scale);
+            }
             "review.thesaurusPane" => {
                 let word = match p.get("word").and_then(Value::as_str) {
                     Some(w) => w.to_string(),
@@ -1279,16 +1412,21 @@ impl SlideApp {
     }
 
     pub fn save_as_dialog(&mut self, format: &str) {
+        let Some(spec) = deckcraft_engine::formats::by_id(format).filter(|f| f.kind == deckcraft_engine::formats::FormatKind::Editable) else {
+            self.set_status(format!("DeckCraft can't save a presentation as “{format}”: use Export for a copy"));
+            return;
+        };
         let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
-        let ext = if format == "pptx" { "pptx" } else { "deckcraft" };
+        let ext = spec.extension;
         let suggested = format!("{name}.{ext}");
         if let Some(pick) = self.services.pick_save.as_mut() {
             if let Some(path) = pick(&suggested) {
-                match self.session.execute("file.saveAs", &json!({"path": path})) {
-                    Ok(_) => {
-                        self.set_status(format!("Saved {path}"));
-                        self.ui.recent.retain(|p| *p != path);
-                        self.ui.recent.insert(0, path);
+                match self.session.execute("file.saveAs", &json!({"path": path, "format": format})) {
+                    Ok(v) => {
+                        let saved = v.get("path").and_then(Value::as_str).unwrap_or(&path).to_string();
+                        self.set_status(format!("Saved {saved}"));
+                        self.ui.recent.retain(|p| *p != saved);
+                        self.ui.recent.insert(0, saved);
                     }
                     Err(e) => self.set_status(e.to_string()),
                 }
@@ -1296,7 +1434,7 @@ impl SlideApp {
         } else if let Some(dl) = self.services.download.as_mut()
             && let Some(d) = self.session.active()
         {
-            match deckcraft_engine::cmd::file::save_bytes(&d.doc, ext) {
+            match deckcraft_engine::cmd::file::save_bytes(&d.doc, spec.id) {
                 Ok(bytes) => dl(&suggested, &bytes),
                 Err(e) => self.set_status(e.to_string()),
             }
@@ -1561,6 +1699,15 @@ impl SlideApp {
         self.last_time = now;
         self.drain_control(ctx);
         self.poll_opening();
+        self.sync_tick(now);
+        if self.session.collab.is_some() {
+            if let Err(e) = self.session.collab_tick() {
+                self.set_status(format!("Live session: {e}"));
+            }
+            // Journals are files on another machine or a synced folder; polling a few times a
+            // second keeps edits live without a busy loop.
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+        }
         if self.fonts_ready {
             self.drain_inbox();
         }
@@ -1858,6 +2005,7 @@ impl SlideApp {
         toast::note_missing_fonts(self);
         toast::show(self, &ctx);
         dialogs::show(self, &ctx);
+        videojob::show(self, &ctx);
         menus::palette(self, &ctx);
         for url in std::mem::take(&mut self.pending_urls) {
             ctx.open_url(egui::OpenUrl::new_tab(url));
@@ -2020,18 +2168,24 @@ fn web_image_files(
     name: &str,
     ext: &str,
     transparent: bool,
+    scale: f64,
 ) -> Vec<(String, Vec<u8>)> {
     let slides: Vec<usize> = if all { (0..doc.slides.len()).collect() } else { vec![current] };
     let single = slides.len() == 1;
-    let scale = 2.0;
+    let scale = deckcraft_engine::cmd::file::image_scale(doc, scale);
     let dpi = deckcraft_render::dpi_for_scale(scale);
     slides
         .into_iter()
         .enumerate()
         .map(|(k, i)| {
-            let opts = deckcraft_render::RenderOpts { scale, transparent_background: transparent && ext == "png", ..Default::default() };
+            let opts =
+                deckcraft_render::RenderOpts { scale, transparent_background: transparent && matches!(ext, "png" | "webp"), ..Default::default() };
             let img = deckcraft_render::render_slide(doc, i, &opts);
-            let bytes = if ext == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) };
+            let bytes = match ext {
+                "png" => img.to_png_at(dpi),
+                "webp" => img.to_webp().unwrap_or_default(),
+                _ => img.to_jpeg_at(92, Some(dpi)),
+            };
             let file = if single { format!("{name}.{ext}") } else { format!("{name}{}.{ext}", k + 1) };
             (file, bytes)
         })
@@ -2131,10 +2285,10 @@ mod tests {
             doc.slides.push(first);
         }
         assert_eq!(doc.slides.len(), 3);
-        let all = web_image_files(&doc, 1, true, "Deck", "png", false);
+        let all = web_image_files(&doc, 1, true, "Deck", "png", false, 2.0);
         let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["Deck1.png", "Deck2.png", "Deck3.png"]);
-        let one = web_image_files(&doc, 1, false, "Deck", "png", false);
+        let one = web_image_files(&doc, 1, false, "Deck", "png", false, 2.0);
         assert_eq!(one.len(), 1);
         assert_eq!(one[0].0, "Deck.png");
     }
@@ -3412,5 +3566,29 @@ mod tests {
         let after = harness.state().ui.ui_scale;
         assert!(after > before + 0.3, "letting go applies the size dragged to: {before} -> {after}");
         assert!(harness.state().dialog.is_some(), "Preferences stays open");
+    }
+
+    /// The quick Export dialog must offer every copy format the registry has, not just the old
+    /// PDF/PNG/JPEG/GIF list. Video entries open the background job; the Backstage page adds the
+    /// full video options.
+    #[test]
+    fn export_dialog_lists_video_webp_and_markdown_copies() {
+        let mut harness = harness();
+        harness.state_mut().run("app.exportDialog", json!({})).unwrap();
+        harness.run_steps(2);
+        for label in [
+            "PDF document (.pdf)",
+            "PNG images (all slides)",
+            "JPEG image (current slide)",
+            "WebP image (current slide)",
+            "PowerPoint Presentation (.pptx)",
+            "Outline (.txt)",
+            "Markdown outline (.md)",
+            "Animated GIF (.gif)",
+            "MP4 video (.mp4)",
+            "WebM video (.webm)",
+        ] {
+            assert!(harness.query_by_label(label).is_some(), "Export lists {label}");
+        }
     }
 }

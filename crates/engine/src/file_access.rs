@@ -462,8 +462,11 @@ mod tests {
             // `io` and this module are the checked gateway; `tests*.rs` are test-only modules.
             // `recovery` and `spell` touch only the app's own folders (AutoRecover files, the
             // system and user spelling dictionaries), never a path a command names.
+            // `collab/relay.rs` is the self-hosted relay server: its root comes from the CLI that
+            // starts it, never from a command path, and the client speaks TCP rather than files.
             if path.parent() == Some(src.as_path()) && matches!(name, "io.rs" | "file_access.rs" | "recovery.rs" | "spell.rs")
                 || name.starts_with("tests")
+                || path.ends_with("collab/relay.rs")
             {
                 continue;
             }

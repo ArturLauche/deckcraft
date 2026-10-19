@@ -85,12 +85,12 @@ fn page_ids_round_trip_and_unknown_ids_are_refused() {
         assert_eq!(Page::parse(p.id()), Some(p));
     }
     assert_eq!(Page::parse(" SAVEAS "), Some(Page::SaveAs));
-    assert_eq!(Page::parse("share"), None);
+    assert_eq!(Page::parse("share"), Some(Page::Share));
     assert_eq!(Page::parse(""), None);
     let (top, bottom) = entries(false);
     assert_eq!(top, vec![Nav::Page(Page::Home), Nav::Page(Page::New), Nav::Page(Page::Open)], "the start screen has no presentation pages");
     assert_eq!(bottom, vec![Nav::Page(Page::Account), Nav::Options]);
-    assert_eq!(entries(true).0.len(), 9);
+    assert_eq!(entries(true).0.len(), 10);
     assert_eq!(split_path("/home/me/Talk.pptx"), ("Talk.pptx".into(), "/home/me".into()));
     assert_eq!(format_bytes(512), "512 bytes");
     assert_eq!(format_bytes(33_485), "32.7 KB");
@@ -158,11 +158,12 @@ fn alt_f_arrows_enter_and_esc_drive_the_side_menu() {
 fn every_page_renders() {
     let mut h = harness(new_app());
     let last_theme = deckcraft_model::theme::builtin_themes().last().map(|t| t.name.clone()).unwrap();
-    let checks: [(Page, &str); 8] = [
+    let checks: [(Page, &str); 9] = [
         (Page::Home, "Recent"),
         (Page::New, &last_theme),
         (Page::Open, "Browse"),
         (Page::Info, "Hidden slides"),
+        (Page::Share, "save the presentation before sharing it"),
         (Page::SaveAs, "Not saved yet"),
         (Page::Print, "Print Hidden Slides"),
         (Page::Export, "Create PDF Document"),
@@ -176,7 +177,9 @@ fn every_page_renders() {
         let selected = h.query_all_by_label(p.label()).any(|n| in_nav(n.rect()));
         assert!(selected, "{} is in the side menu", p.label());
     }
-    assert!(h.state_mut().run("app.backstage", json!({"page": "share"})).is_err(), "Share (cloud) isn't offered");
+    h.state_mut().run("app.backstage", json!({"page": "share"})).unwrap();
+    h.run_steps(3);
+    assert_eq!(page(&h), Some(Page::Share));
 }
 
 /// A starter template from File › New opens its deck and leaves the File tab.
@@ -552,6 +555,11 @@ fn print_slides_follow_the_settings() {
     assert_eq!(print_params(&bs, &[1, 3])["perPage"], 6);
     assert_eq!(print_params(&bs, &[1, 3])["layout"], "handouts");
     assert_eq!(print_params(&bs, &[1])["paper"], "letter");
+    assert_eq!(print_params(&bs, &[1])["margin"], 36.0);
+    assert_eq!(print_params(&bs, &[1])["scale"], 100.0);
+    assert_eq!(print_params(&bs, &[1])["pageNumbers"], true);
+    assert_eq!(print_params(&bs, &[1])["direct"], false);
+    assert_eq!(print_params(&bs, &[1])["fitPaper"], false);
     assert_eq!(print_page_size(&bs, &doc), (612.0, 792.0));
     bs.print_paper = "a4";
     bs.print_landscape = true;
@@ -560,4 +568,31 @@ fn print_slides_follow_the_settings() {
     assert!((w - 841.89).abs() < 0.01 && (h - 595.28).abs() < 0.01);
     bs.print_layout = "slides";
     assert_eq!(print_page_size(&bs, &doc), (doc.slide_size.width as f32, doc.slide_size.height as f32), "slides print slide-shaped");
+    bs.print_fit_paper = true;
+    assert_eq!(print_params(&bs, &[1])["fitPaper"], true);
+    let (w, h) = print_page_size(&bs, &doc);
+    assert!((w - 841.89).abs() < 0.01 && (h - 595.28).abs() < 0.01, "fit-to-paper uses the chosen paper");
+    bs.print_margin = 500.0;
+    bs.print_scale = 1.0;
+    assert_eq!(print_params(&bs, &[1])["margin"], 216.0);
+    assert_eq!(print_params(&bs, &[1])["scale"], 10.0);
+}
+
+#[test]
+fn template_options_build_custom_new_params() {
+    let mut o = TemplateOptions::default();
+    assert_eq!(o.params("Briefing"), json!({"template": "Briefing"}));
+    o.theme = "Ember".into();
+    o.dark = true;
+    o.major = "Inter".into();
+    o.minor = "Open Sans".into();
+    assert_eq!(
+        o.params("Briefing"),
+        json!({"template": "Briefing", "theme": "Ember", "variant": "dark", "fonts": {"major": "Inter", "minor": "Open Sans"}})
+    );
+    o.theme.clear();
+    o.dark = false;
+    o.major = "  ".into();
+    o.minor = "Lato".into();
+    assert_eq!(o.params("Lesson"), json!({"template": "Lesson", "fonts": {"minor": "Lato"}}));
 }

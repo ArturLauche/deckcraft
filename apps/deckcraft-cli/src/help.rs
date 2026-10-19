@@ -126,6 +126,20 @@ and prints its answer as JSON. COMMAND [PARAMS] runs a command, as run --cmd doe
   deckcraft-cli app --method ui.screenshot '{\"path\":\"/tmp/shot.png\"}'",
     },
     Subcommand {
+        name: "relay",
+        usage: "relay --token SECRET [--listen HOST:PORT] [--dir FOLDER]",
+        summary: "host a self-hosted live-collaboration relay",
+        details: "Serves live-session rooms over TCP. Every peer sends the same token; each room stores its snapshot,
+command journals and presence under FOLDER (deckcraft-relay by default). The address is
+host:port, 127.0.0.1:8787 by default, and is what File > Share > Live session asks for.
+
+  deckcraft-cli relay --token 'a long room secret' --listen 0.0.0.0:8787 --dir /srv/deckcraft
+
+The relay is a transport, not a merge engine: peers still order commands by timestamp, so two
+edits to the same text at the same instant resolve last-writer-wins. Put it behind TLS (a reverse
+proxy) when it leaves localhost; the relay itself speaks plain TCP.",
+    },
+    Subcommand {
         name: "mcp",
         usage: "mcp [--connect PORT] [--sample] [--automation-read-root DIR] [--automation-write-root DIR]",
         summary: "serve the commands to an agent over MCP on stdio",

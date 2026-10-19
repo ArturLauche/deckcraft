@@ -71,6 +71,7 @@ fn main() -> ExitCode {
         }
         Some("describe") => report(describe(rest.first().map(String::as_str))),
         Some("app") => report(app(rest)),
+        Some("relay") => report(relay(rest)),
         Some("mcp") => report(mcp(rest)),
         Some("links") => {
             use deckcraft_engine::links::*;
@@ -603,6 +604,31 @@ fn app(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// A small self-hosted collaboration relay: rooms of journal files over TCP.
+fn relay(args: &[String]) -> Result<(), String> {
+    use std::net::TcpListener;
+    let mut listen = "127.0.0.1:8787".to_string();
+    let mut dir = std::path::PathBuf::from("deckcraft-relay");
+    let mut token: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--listen" => listen = it.next().cloned().ok_or("--listen needs host:port")?,
+            "--dir" => dir = std::path::PathBuf::from(it.next().ok_or("--dir needs a folder")?),
+            "--token" => token = Some(it.next().cloned().ok_or("--token needs a value")?),
+            "--help" | "-h" => {
+                outln!("{}", help_page("relay"));
+                return Ok(());
+            }
+            other => return Err(format!("unknown relay option `{other}`")),
+        }
+    }
+    let token = token.filter(|t| !t.trim().is_empty()).ok_or("relay needs --token SECRET (every peer sends the same token)")?;
+    let listener = TcpListener::bind(&listen).map_err(|e| format!("can't listen on {listen}: {e}"))?;
+    eprintln!("deckcraft-relay: listening on {listen}, rooms under {}", dir.display());
+    deckcraft_engine::collab::relay::serve(listener, dir, token).map_err(|e| format!("relay stopped: {e}"))
+}
+
 fn mcp(args: &[String]) -> Result<(), String> {
     use deckcraft_engine::file_access::{self, AutomationRoots};
     use deckcraft_mcp::{Backend, Headless, Remote, Server, control_addr};
@@ -684,6 +710,8 @@ mod tests {
         assert!(run(&args(&["--help"])).is_ok());
         assert!(describe(Some("--help")).is_ok());
         assert!(mcp(&args(&["-h"])).is_ok());
+        assert!(relay(&args(&["-h"])).is_ok());
+        assert!(relay(&args(&[])).unwrap_err().contains("--token"));
     }
 
     #[test]

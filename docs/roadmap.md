@@ -1,6 +1,6 @@
 # DeckCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** major (community PR wave 2026-10-14: PPTX corpus, presenter and show controls, review navigation, starter decks, Grid Options and New Window, WordArt gallery and handles, pen pressure; beta items 9 and 10 narrowed; duplicated rows and headers folded; previous: minor, core-workflow alpha gate added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (live collaboration gains a self-hosted TCP relay; template theme/dark/font customisation, encrypted settings sync, and print margins/scaling/header/footer/direct `lp`; previous: shared-folder live collaboration, video export, format registry, templates, share links and settings sync) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -19,7 +19,7 @@ points and lead the beta plan.
 | Open a colleague's `.pptx`, edit it, save it back as `.pptx` that PowerPoint opens | partial (not blocking) | The reader is lenient and keeps unknown objects. Files open in PowerPoint without repair (checked 2026-10-06). But only generated decks have been tested; text inside EMF/WMF pictures is missing; comment threads, media options and rewind are lost (#70, #74, #77) | 31–55 |
 | Present: full-screen show with transitions, animations, media, presenter view with notes, next slide and timer | yes | 48/48 transitions, 64 effects, triggers, builds, media playback, presenter window, See All Slides and zoom. The presenter timer pauses and resets, and notes have a size control. A custom show plays only its slides. Typing a slide number during the show shows it, and Enter goes there. Presenter view isn't placed on the second display automatically (drag it there; #433) | 2–4 |
 | Add business content: tables, charts with their data, simple diagrams | partial (not blocking) | Tables with styles, merge/split, all D or P. Charts insert with the common types and edit data in the Chart Data dialog (P0 partial); SmartArt is basic (pre-drawn shapes) | 12–20 |
-| Share the deck: PDF of slides, notes or handouts; images | yes | `file.export` PDF with text layer, links, bookmarks, handouts 1–9; PNG/JPEG. Artwork is raster in the PDF; no direct print (print the PDF) | 10–16 |
+| Share the deck: PDF of slides, notes or handouts; images; video; live session | yes | `file.export` PDF with text layer, links, bookmarks, handouts 1–9, colour modes, margins, scaling, header/footer and page numbers; PNG/JPEG/WebP; MP4/WebM through ffmpeg; GIF; `collab.*` journal over a shared folder or self-hosted TCP relay with presence and cursors. Artwork is raster in the PDF; print opens the PDF or sends it with `lp`; a CRDT merge and relay TLS remain | 6–10 |
 | Review: comments with replies, resolve, spelling | partial (not blocking) | Comments, replies and resolve work and survive `.deckcraft` and `.pptx` (#70); Previous and Next walk every slide and the pane lists them; spelling uses installed Hunspell dictionaries (only a short built-in list where none is installed) | 4–8 |
 
 ## Current focus (2026-10-10)
@@ -47,7 +47,7 @@ Beta means ~75% ready for real work and opening and saving PowerPoint's `.pptx` 
 | 2 | PPTX real-deck corpus and fixes | 20–35 | File formats 58 → 75% |
 | 3 | PPTX round-trip losses (#70, #74, #77), `.potx`/`.ppsx`/`.pptm` content types, MicroType embedded-font subsets | 8–15 | File formats → 80% |
 | 4 | EMF/WMF and SVG pictures | 8–14 | File formats, Pictures |
-| 5 | Vector PDF, printing | 10–16 | File formats, Files |
+| 5 | Vector PDF and per-platform native print sheets (margins/scaling done) | 6–10 | File formats, Files |
 | 6 | Localization infrastructure + zh-Hans, es, fr, de, ja (with IME) | 27–46 | Localization 8 → ~40% |
 | 7 | Font weights (#69), image paste (#53), Tab in text (#78) | 6–11 | Features |
 | 8 | Charts: data grid, elements | 6–10 | Features |
@@ -64,11 +64,11 @@ reference renders, a Windows tester with the affected GPUs, native speakers to r
 ## After beta: toward full parity (~245–440 h more)
 
 SmartArt depth, the remaining animation effects and motion paths, edit-point segment types and
-3-D depth, bundled proofing dictionaries, Zoom depth, recording, video export, legacy `.ppt` import
-and `.odp` (owner decision), GPU rasterization, hardware video decode, pen tilt (pressure already
-scales ink width) and pinch zoom, the other 21 languages with RTL mirroring, a larger template
-gallery (six original starters ship), and local AI features (owner decision on models). Itemized
-with hours in [gaps.md](gaps.md).
+3-D depth, bundled proofing dictionaries, Zoom depth, recording, CRDT merge and relay TLS
+beyond the folder/relay journal, legacy `.ppt` import and `.odp` (owner decision), GPU rasterization, hardware
+video decode, pen tilt (pressure already scales ink width) and pinch zoom, the other 21 languages
+with RTL mirroring, a larger template gallery (17 original starters ship), and local AI features
+(owner decision on models). Itemized with hours in [gaps.md](gaps.md).
 
 ## Milestones
 
@@ -87,8 +87,8 @@ From the local execution plan (`plan/execution-plan.md`, gitignored). Status as 
 | M8 | Tables and charts | partly | chart data grid, elements, chartex types, draw table |
 | M9 | SmartArt, equations, WordArt | partly | SmartArt layouts and PowerPoint-diagram fidelity, equations (PR #55); the text pane, warp gallery and warp handles are in |
 | M10 | Views | done | Arrange All (grid options and New Window are in) |
-| M11 | Output | partly | vector PDF, SVG, GIF, MP4, print |
-| M12 | Review | partly | dictionaries, AutoCorrect, find/replace dialog, compare |
+| M11 | Output | partly | vector PDF, SVG and native print sheets; margins/scaling, GIF and MP4/WebM done |
+| M12 | Review | partly | dictionaries, AutoCorrect, find/replace dialog, compare; live folder/relay journal in, CRDT/TLS open |
 | M13 | Automation and CLI parity | done | |
 | M14 | 1.0 polish and release | partly | i18n, native menu bar, signed releases done (v0.4.0) |
 
@@ -115,6 +115,8 @@ plan above.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Live collaboration over a shared folder or self-hosted TCP relay: ordered journals, roles, presence/cursors, snapshot undo and recovery. CRDT merge and relay TLS stay after beta |
+| 2026-10-19 | major | Video export and the format registry narrow output to vector PDF and native print; print gains margins/scaling/header-footer and direct `lp`; 17 starter templates gain theme/dark/font customisation; sharing/settings sync land. Real-time co-editing stays after beta |
 | 2026-10-15 | trivial | PPTX trigger click steps survive save, including by-paragraph builds. Interactive-deck gaps remain media actions, audio triggers and click-box geometry; milestone scope and feature scores unchanged |
 | 2026-10-14 | trivial | M13 reliability: remote MCP validates IDs and envelopes, caps replies and rejects incomplete frames; #718 |
 | 2026-10-14 | minor | Community PR wave folded: one Review gate row, one Current focus item 2, one beta row each for items 9 and 10 (timeline and timer controls are in), one after-beta paragraph, one M9 and M10 row, one corpus row in the 2026-10-07 history |

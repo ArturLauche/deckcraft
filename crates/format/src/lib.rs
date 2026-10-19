@@ -610,8 +610,20 @@ pub fn markdown_to_slides(p: &mut Presentation, text: &str) -> usize {
         return outline_to_slides(p, text);
     }
     let mut slides: OutlineSlides = Vec::new();
+    let mut in_comment = false;
     for line in text.lines() {
-        if line.trim().is_empty() {
+        let t = line.trim();
+        if in_comment {
+            if t.contains("-->") {
+                in_comment = false;
+            }
+            continue;
+        }
+        if t.starts_with("<!--") {
+            in_comment = !t.contains("-->");
+            continue;
+        }
+        if t.is_empty() {
             continue;
         }
         if let Some(title) = md_heading(line) {
@@ -622,6 +634,53 @@ pub fn markdown_to_slides(p: &mut Presentation, text: &str) -> usize {
         }
     }
     add_outline_slides(p, slides)
+}
+
+/// The deck as a Markdown outline: one `##` heading per slide, bullets nested by outline level,
+/// speaker notes in an HTML comment (which [`markdown_to_slides`] skips). Tables become pipe
+/// tables, so a reader sees the data even though a round trip keeps only their text.
+pub fn slides_to_markdown(p: &Presentation) -> String {
+    let mut out = String::new();
+    for (i, s) in p.slides.iter().enumerate() {
+        let title = s.title().replace('\n', " ");
+        let title = title.trim();
+        if title.is_empty() {
+            out.push_str(&format!("## Slide {}\n\n", i + 1));
+        } else {
+            out.push_str(&format!("## {title}\n\n"));
+        }
+        for sh in &s.shapes {
+            if sh.ph_type().is_some_and(|k| k.is_title()) {
+                continue;
+            }
+            if let Some(t) = &sh.text {
+                for para in &t.paragraphs {
+                    if para.is_empty() {
+                        continue;
+                    }
+                    let indent = "  ".repeat(usize::from(para.level.min(8)));
+                    out.push_str(&format!("{indent}- {}\n", para.text().replace('\u{b}', " ")));
+                }
+                out.push('\n');
+            }
+            if let ShapeKind::Table(t) = &sh.kind {
+                for (r, row) in t.rows.iter().enumerate() {
+                    let cells: Vec<String> = row.cells.iter().map(|c| c.text.text().replace(['\u{b}', '\n', '|'], " ")).collect();
+                    out.push_str(&format!("| {} |\n", cells.join(" | ")));
+                    if r == 0 {
+                        out.push_str(&format!("|{}|\n", " --- |".repeat(cells.len())));
+                    }
+                }
+                out.push('\n');
+            }
+        }
+        let notes = s.notes_text();
+        if !notes.trim().is_empty() {
+            let notes = notes.replace("-->", "--&gt;").replace('\n', " ");
+            out.push_str(&format!("<!-- notes: {notes} -->\n\n"));
+        }
+    }
+    out
 }
 
 /// The deck as outline text (titles unindented, body paragraphs tab-indented by level).
